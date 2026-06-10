@@ -1,8 +1,8 @@
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
-import { join } from 'path';
 import { AppModule } from './app.module';
 import { loadLocalEnv } from './env';
+import { resolvePublicPath } from './public-path';
 
 loadLocalEnv();
 
@@ -12,8 +12,9 @@ async function bootstrap() {
   app.setGlobalPrefix('api', {
     exclude: ['/', '/admin'],
   });
-  app.useStaticAssets(join(__dirname, 'public'));
-  app.setBaseViewsDir(join(__dirname, 'public'));
+  const publicPath = resolvePublicPath();
+  app.useStaticAssets(publicPath);
+  app.setBaseViewsDir(publicPath);
 
   const port = process.env.PORT || 3000;
   await app.listen(port);

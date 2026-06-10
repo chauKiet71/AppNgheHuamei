@@ -1,16 +1,17 @@
 import { Controller, Get, Res } from '@nestjs/common';
 import { Response } from 'express';
 import { join } from 'path';
+import { resolvePublicPath } from './public-path';
 
 @Controller()
 export class AppController {
   @Get()
   index(@Res() response: Response) {
-    return response.sendFile(join(__dirname, 'public', 'index.html'));
+    return response.sendFile(join(resolvePublicPath(), 'index.html'));
   }
 
   @Get('admin')
   admin(@Res() response: Response) {
-    return response.sendFile(join(__dirname, 'public', 'admin.html'));
+    return response.sendFile(join(resolvePublicPath(), 'admin.html'));
   }
 }

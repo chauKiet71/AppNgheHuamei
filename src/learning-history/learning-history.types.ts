@@ -1,0 +1,40 @@
+export type LearningHistoryRecord = {
+  id: string;
+  userId: string;
+  topicId?: string;
+  levelId?: string;
+  sectionId?: string;
+  lessonId?: string;
+  dayId: string;
+  topicTitle?: string;
+  levelTitle?: string;
+  sectionTitle?: string;
+  lessonTitle?: string;
+  dayTitle?: string;
+  correct: number;
+  answered: number;
+  total: number;
+  accuracy: number;
+  durationSeconds: number;
+  completedAt: string;
+  createdAt: string;
+};
+
+export type CreateLearningHistoryInput = {
+  topicId?: string;
+  levelId?: string;
+  sectionId?: string;
+  lessonId?: string;
+  dayId?: string;
+  topicTitle?: string;
+  levelTitle?: string;
+  sectionTitle?: string;
+  lessonTitle?: string;
+  dayTitle?: string;
+  correct?: number;
+  answered?: number;
+  total?: number;
+  accuracy?: number;
+  durationSeconds?: number;
+  completedAt?: string;
+};

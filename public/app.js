@@ -29,6 +29,9 @@ const state = {
   profileEditing: false,
   avatarUploading: false,
   historyExpanded: false,
+  historyRecords: [],
+  historyLoaded: false,
+  historyLoading: false,
 };
 
 const iconMap = {
@@ -548,6 +551,7 @@ function toggleLanguage() {
 async function init() {
   await loadCurrentUser();
   await loadTopics();
+  await loadLearningHistory();
   render();
 }
 
@@ -670,48 +674,27 @@ function currentTracks() {
   return tracksOfDay(currentDay());
 }
 
-function progressUserKey() {
-  return state.user?.id || 'guest';
-}
-
-function dayProgressKey(dayId) {
-  return `listeningProgress:${progressUserKey()}:${dayId}`;
-}
-
-function learningHistoryKey() {
-  return `learningHistory:${progressUserKey()}`;
-}
-
 function readLearningHistory() {
-  try {
-    const records = JSON.parse(localStorage.getItem(learningHistoryKey()) || '[]');
-    return Array.isArray(records) ? records : [];
-  } catch (error) {
-    return [];
-  }
+  return Array.isArray(state.historyRecords) ? state.historyRecords : [];
 }
 
 function writeLearningHistory(records) {
-  localStorage.setItem(learningHistoryKey(), JSON.stringify(records.slice(0, 80)));
+  state.historyRecords = Array.isArray(records) ? records.slice(0, 80) : [];
 }
 
 function isDayCompleted(dayId) {
-  return localStorage.getItem(dayProgressKey(dayId)) === 'done';
+  return readLearningHistory().some((record) => record.dayId === dayId);
 }
 
 function markCurrentDayCompleted() {
-  const day = currentDay();
-  if (day?.id) {
-    localStorage.setItem(dayProgressKey(day.id), 'done');
-  }
-  recordLearningHistory();
+  recordLearningHistory().catch(() => {});
 }
 
-function recordLearningHistory() {
+function buildLearningHistoryPayload() {
   const day = currentDay();
   const lesson = currentLesson();
   if (!day?.id) {
-    return;
+    return null;
   }
   const tracks = currentTracks();
   const answers = state.answers.filter(Boolean);
@@ -720,8 +703,7 @@ function recordLearningHistory() {
   const correct = answers.filter((answer) => answer.correct).length;
   const completedAt = new Date().toISOString();
   const durationSeconds = Math.max(60, Math.round((Date.now() - (state.sessionStartedAt || Date.now())) / 1000));
-  const entry = {
-    id: `${day.id}:${Date.now()}`,
+  return {
     completedAt,
     durationSeconds,
     topicId: state.topicId,
@@ -739,7 +721,51 @@ function recordLearningHistory() {
     total,
     accuracy: Math.round((correct / Math.max(1, answered)) * 100) || 0,
   };
-  writeLearningHistory([entry, ...readLearningHistory()]);
+}
+
+async function recordLearningHistory() {
+  const payload = buildLearningHistoryPayload();
+  if (!payload || !state.authToken) {
+    return;
+  }
+
+  const response = await apiFetch('/api/learning-history', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${state.authToken}`,
+    },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    throw new Error('Cannot save learning history.');
+  }
+  const savedRecord = await response.json();
+  writeLearningHistory([savedRecord, ...readLearningHistory()]);
+}
+
+async function loadLearningHistory() {
+  if (!state.authToken) {
+    writeLearningHistory([]);
+    state.historyLoaded = true;
+    return;
+  }
+  state.historyLoading = true;
+  try {
+    const response = await apiFetch('/api/learning-history', {
+      headers: { Authorization: `Bearer ${state.authToken}` },
+    });
+    if (!response.ok) {
+      throw new Error('Cannot load learning history.');
+    }
+    writeLearningHistory(await response.json());
+    state.historyLoaded = true;
+  } catch {
+    writeLearningHistory([]);
+    state.historyLoaded = true;
+  } finally {
+    state.historyLoading = false;
+  }
 }
 
 function icon(name, size = 19) {
@@ -993,6 +1019,13 @@ function showAllLearningHistory() {
 
 function renderHistory() {
   const isZh = state.locale === 'zh';
+  if (state.authToken && !state.historyLoaded && !state.historyLoading) {
+    loadLearningHistory().then(() => {
+      if (state.screen === 'history') {
+        renderHistory();
+      }
+    });
+  }
   const records = readLearningHistory();
   const totalTime = records.reduce((sum, record) => sum + (Number(record.durationSeconds) || 0), 0);
   const averageAccuracy = records.length
@@ -1002,6 +1035,7 @@ function renderHistory() {
   const title = isZh ? '学习历史' : 'Lịch sử học tập';
   const emptyTitle = isZh ? '还没有学习记录' : 'Chưa có lịch sử học tập';
   const emptyCopy = isZh ? '完成一次练习后，最近学习路线会保存在这里。' : 'Hoàn thành một ngày luyện để lưu lại lộ trình gần đây.';
+  const needsLogin = !state.authToken || !state.user;
 
   mount(`
     <section class="history-screen">
@@ -1042,7 +1076,20 @@ function renderHistory() {
       <section class="history-section">
         <h2>${isZh ? '最近' : 'Gần đây'}</h2>
         ${
-          recentRecords.length
+          needsLogin
+            ? `<div class="history-empty">
+                <span>${icon('profile', 28)}</span>
+                <strong>${isZh ? '请先登录' : 'Vui lòng đăng nhập'}</strong>
+                <p>${isZh ? '登录后，学习历史会保存在数据库中。' : 'Đăng nhập để lưu lịch sử học tập xuống cơ sở dữ liệu.'}</p>
+                <button class="primary-btn" type="button" onclick="go('login')">${t('login')}</button>
+              </div>`
+            : state.historyLoading && !state.historyLoaded
+              ? `<div class="history-empty">
+                  <span>${icon('loader-circle', 28)}</span>
+                  <strong>${isZh ? '正在加载' : 'Đang tải lịch sử'}</strong>
+                  <p>${isZh ? '请稍等片刻。' : 'Vui lòng chờ trong giây lát.'}</p>
+                </div>`
+              : recentRecords.length
             ? `<div class="history-recent-list">
                 ${recentRecords
                   .map(
@@ -1447,6 +1494,8 @@ function authMessage() {
 function setAuth(result) {
   state.authToken = result.token;
   state.user = result.user;
+  state.historyRecords = [];
+  state.historyLoaded = false;
   localStorage.setItem('authToken', result.token);
   localStorage.setItem('authUser', JSON.stringify(result.user));
   state.authError = '';
@@ -1545,6 +1594,7 @@ async function loadCurrentUser() {
       throw new Error('Invalid session');
     }
     state.user = await response.json();
+    state.historyLoaded = false;
   } catch {
     const cachedUser = localStorage.getItem('authUser');
     if (cachedUser) {
@@ -1553,6 +1603,8 @@ async function loadCurrentUser() {
     }
     state.authToken = '';
     state.user = null;
+    writeLearningHistory([]);
+    state.historyLoaded = true;
     localStorage.removeItem('authToken');
   }
 }
@@ -1570,6 +1622,7 @@ async function submitLogin() {
   renderLogin();
   try {
     setAuth(await authRequest('login', { email, password }));
+    await loadLearningHistory();
     state.screen = 'profile';
     state.authLoading = false;
     renderProfile();
@@ -1594,6 +1647,7 @@ async function submitRegister() {
   renderRegister();
   try {
     setAuth(await authRequest('register', { name, email, password }));
+    await loadLearningHistory();
     state.screen = 'profile';
     state.authLoading = false;
     renderProfile();
@@ -1610,6 +1664,9 @@ async function logout() {
   state.user = null;
   state.profileEditing = false;
   state.avatarUploading = false;
+  writeLearningHistory([]);
+  state.historyLoaded = true;
+  state.historyLoading = false;
   localStorage.removeItem('authToken');
   localStorage.removeItem('authUser');
   if (token) {

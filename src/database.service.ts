@@ -51,6 +51,31 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
     `);
 
     await this.pool.query('alter table app_users add column if not exists avatar_url text');
+
+    await this.pool.query(`
+      create table if not exists learning_history (
+        id text primary key,
+        user_id text not null references app_users(id) on delete cascade,
+        topic_id text,
+        level_id text,
+        section_id text,
+        lesson_id text,
+        day_id text not null,
+        topic_title text,
+        level_title text,
+        section_title text,
+        lesson_title text,
+        day_title text,
+        correct_count integer not null default 0,
+        answered_count integer not null default 0,
+        total_count integer not null default 0,
+        accuracy integer not null default 0,
+        duration_seconds integer not null default 0,
+        completed_at timestamptz not null default now(),
+        created_at timestamptz not null default now()
+      )
+    `);
+    await this.pool.query('create index if not exists learning_history_user_completed_idx on learning_history (user_id, completed_at desc)');
   }
 
   async onModuleDestroy(): Promise<void> {

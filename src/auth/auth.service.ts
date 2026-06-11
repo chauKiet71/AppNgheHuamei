@@ -105,6 +105,10 @@ export class AuthService {
     return this.publicUser(user);
   }
 
+  async requireUser(token?: string): Promise<PublicUser> {
+    return this.me(token);
+  }
+
   async updateMe(token: string | undefined, input: { name?: string; email?: string; password?: string; avatarUrl?: string }): Promise<PublicUser> {
     const user = await this.findByToken(this.cleanBearer(token));
     if (!user) {

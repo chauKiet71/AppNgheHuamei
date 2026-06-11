@@ -3,8 +3,8 @@ import { join } from 'path';
 
 export function resolvePublicPath(): string {
   const candidates = [
-    join(process.cwd(), 'dist', 'public'),
     join(process.cwd(), 'public'),
+    join(process.cwd(), 'dist', 'public'),
     join(__dirname, 'public'),
     join(__dirname, '..', 'public'),
   ];

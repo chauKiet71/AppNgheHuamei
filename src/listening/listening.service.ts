@@ -1,7 +1,14 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { DatabaseService } from '../database.service';
 import { listeningTopics } from './listening.data';
-import { ListeningLesson, ListeningLevel, ListeningSection, ListeningTopic, ListeningTrack } from './listening.types';
+import {
+  ListeningDay,
+  ListeningLesson,
+  ListeningLevel,
+  ListeningSection,
+  ListeningTopic,
+  ListeningTrack,
+} from './listening.types';
 
 type TopicInput = Partial<Omit<ListeningTopic, 'levels' | 'sections'>> & {
   levels?: ListeningLevel[];
@@ -9,7 +16,8 @@ type TopicInput = Partial<Omit<ListeningTopic, 'levels' | 'sections'>> & {
 };
 type LevelInput = Partial<Omit<ListeningLevel, 'sections'>> & { sections?: ListeningSection[] };
 type SectionInput = Partial<Omit<ListeningSection, 'lessons'>> & { lessons?: ListeningLesson[] };
-type LessonInput = Partial<Omit<ListeningLesson, 'tracks'>> & { tracks?: ListeningTrack[] };
+type LessonInput = Partial<Omit<ListeningLesson, 'days' | 'tracks'>> & { days?: ListeningDay[]; tracks?: ListeningTrack[] };
+type DayInput = Partial<Omit<ListeningDay, 'tracks'>> & { tracks?: ListeningTrack[] };
 type TrackInput = Partial<ListeningTrack>;
 type TopicRow = { id: string; data: ListeningTopic };
 
@@ -116,6 +124,17 @@ export class ListeningService {
     return { deleted: true };
   }
 
+  async moveLevel(topicId: string, levelId: string, direction: 'up' | 'down'): Promise<ListeningLevel[]> {
+    const topics = await this.loadTopics();
+    const topic = this.findTopic(topics, topicId);
+    topic.levels = topic.levels || [];
+    const moved = this.moveItem(topic.levels, levelId, direction, 'Level not found');
+    if (moved) {
+      await this.saveTopic(topic, topics.indexOf(topic));
+    }
+    return topic.levels;
+  }
+
   async deleteTopic(topicId: string): Promise<{ deleted: true }> {
     const topics = await this.loadTopics();
     const index = topics.findIndex((item) => item.id === topicId);
@@ -167,6 +186,18 @@ export class ListeningService {
     throw new NotFoundException('Section not found');
   }
 
+  async moveSection(topicId: string, levelId: string, sectionId: string, direction: 'up' | 'down'): Promise<ListeningSection[]> {
+    const topics = await this.loadTopics();
+    const topic = this.findTopic(topics, topicId);
+    const level = this.findLevel(topic, levelId);
+    level.sections = level.sections || [];
+    const moved = this.moveItem(level.sections, sectionId, direction, 'Section not found');
+    if (moved) {
+      await this.saveTopic(topic, topics.indexOf(topic));
+    }
+    return level.sections;
+  }
+
   async createLesson(topicId: string, sectionId: string, input: LessonInput): Promise<ListeningLesson> {
     const topics = await this.loadTopics();
     const topic = this.findTopic(topics, topicId);
@@ -177,7 +208,14 @@ export class ListeningService {
       description: input.description || 'Mô tả bộ đề.',
       level: input.level || 'HSK3',
       goal: input.goal || 'Luyện nghe',
-      tracks: input.tracks || [],
+      days: input.days || [
+        {
+          id: this.uniqueId('day-1'),
+          title: 'Ngày 1',
+          description: 'Bộ câu hỏi ngày 1',
+          tracks: input.tracks || [],
+        },
+      ],
     };
     section.lessons.unshift(lesson);
     await this.saveTopic(topic, topics.indexOf(topic));
@@ -206,12 +244,90 @@ export class ListeningService {
     return { deleted: true };
   }
 
-  async createTrack(topicId: string, sectionId: string, lessonId: string, input: TrackInput): Promise<ListeningTrack> {
+  async createDay(topicId: string, sectionId: string, lessonId: string, input: DayInput): Promise<ListeningDay> {
     const topics = await this.loadTopics();
     const topic = this.findTopic(topics, topicId);
     const lesson = this.findLesson(this.findSectionInTopic(topic, sectionId), lessonId);
+    const day: ListeningDay = {
+      id: this.uniqueId(input.id || input.title || 'day'),
+      title: input.title || 'Ngày mới',
+      description: input.description || 'Mô tả ngày luyện tập.',
+      tracks: input.tracks || [],
+    };
+    lesson.days = this.daysOfLesson(lesson);
+    lesson.days.unshift(day);
+    await this.saveTopic(topic, topics.indexOf(topic));
+    return day;
+  }
+
+  async updateDay(
+    topicId: string,
+    sectionId: string,
+    lessonId: string,
+    dayId: string,
+    input: DayInput,
+  ): Promise<ListeningDay> {
+    const topics = await this.loadTopics();
+    const topic = this.findTopic(topics, topicId);
+    const lesson = this.findLesson(this.findSectionInTopic(topic, sectionId), lessonId);
+    const day = this.findDay(lesson, dayId);
+    Object.assign(day, this.clean(input, ['tracks']));
+    await this.saveTopic(topic, topics.indexOf(topic));
+    return day;
+  }
+
+  async deleteDay(topicId: string, sectionId: string, lessonId: string, dayId: string): Promise<{ deleted: true }> {
+    const topics = await this.loadTopics();
+    const topic = this.findTopic(topics, topicId);
+    const lesson = this.findLesson(this.findSectionInTopic(topic, sectionId), lessonId);
+    lesson.days = this.daysOfLesson(lesson);
+    const index = lesson.days.findIndex((item) => item.id === dayId);
+    if (index < 0) {
+      throw new NotFoundException('Day not found');
+    }
+    lesson.days.splice(index, 1);
+    await this.saveTopic(topic, topics.indexOf(topic));
+    return { deleted: true };
+  }
+
+  async moveDay(
+    topicId: string,
+    sectionId: string,
+    lessonId: string,
+    dayId: string,
+    direction: 'up' | 'down',
+  ): Promise<ListeningDay[]> {
+    const topics = await this.loadTopics();
+    const topic = this.findTopic(topics, topicId);
+    const lesson = this.findLesson(this.findSectionInTopic(topic, sectionId), lessonId);
+    lesson.days = this.daysOfLesson(lesson);
+    const index = lesson.days.findIndex((item) => item.id === dayId);
+    if (index < 0) {
+      throw new NotFoundException('Day not found');
+    }
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= lesson.days.length) {
+      return lesson.days;
+    }
+    const [day] = lesson.days.splice(index, 1);
+    lesson.days.splice(targetIndex, 0, day);
+    await this.saveTopic(topic, topics.indexOf(topic));
+    return lesson.days;
+  }
+
+  async createTrack(
+    topicId: string,
+    sectionId: string,
+    lessonId: string,
+    input: TrackInput,
+    dayId?: string,
+  ): Promise<ListeningTrack> {
+    const topics = await this.loadTopics();
+    const topic = this.findTopic(topics, topicId);
+    const lesson = this.findLesson(this.findSectionInTopic(topic, sectionId), lessonId);
+    const day = dayId ? this.findDay(lesson, dayId) : this.ensureFirstDay(lesson);
     const track = this.normalizeTrack(input);
-    lesson.tracks.push(track);
+    day.tracks.push(track);
     await this.saveTopic(topic, topics.indexOf(topic));
     return track;
   }
@@ -236,13 +352,15 @@ export class ListeningService {
     const topics = await this.loadTopics();
     const topic = this.findTopic(topics, topicId);
     const lesson = this.findLesson(this.findSectionInTopic(topic, sectionId), lessonId);
-    const index = lesson.tracks.findIndex((item) => item.id === trackId);
-    if (index < 0) {
-      throw new NotFoundException('Question not found');
+    for (const day of this.daysOfLesson(lesson)) {
+      const index = day.tracks.findIndex((item) => item.id === trackId);
+      if (index >= 0) {
+        day.tracks.splice(index, 1);
+        await this.saveTopic(topic, topics.indexOf(topic));
+        return { deleted: true };
+      }
     }
-    lesson.tracks.splice(index, 1);
-    await this.saveTopic(topic, topics.indexOf(topic));
-    return { deleted: true };
+    throw new NotFoundException('Question not found');
   }
 
   async attachTrackAudio(
@@ -257,6 +375,26 @@ export class ListeningService {
     const track = this.findTrack(this.findLesson(this.findSectionInTopic(topic, sectionId), lessonId), trackId);
     track.audioFileName = audio.fileName;
     track.audioUrl = audio.url;
+    await this.saveTopic(topic, topics.indexOf(topic));
+    return track;
+  }
+
+  async attachTrackOptionImage(
+    topicId: string,
+    sectionId: string,
+    lessonId: string,
+    trackId: string,
+    optionIndex: number,
+    imageUrl: string,
+  ): Promise<ListeningTrack> {
+    const topics = await this.loadTopics();
+    const topic = this.findTopic(topics, topicId);
+    const track = this.findTrack(this.findLesson(this.findSectionInTopic(topic, sectionId), lessonId), trackId);
+    if (optionIndex < 0 || optionIndex > 3) {
+      throw new BadRequestException('Option image index must be between 0 and 3');
+    }
+    track.optionImages = this.fourOptionImages(track.optionImages);
+    track.optionImages[optionIndex] = imageUrl;
     await this.saveTopic(topic, topics.indexOf(topic));
     return track;
   }
@@ -322,14 +460,18 @@ export class ListeningService {
       id: this.uniqueId(input.id || input.title || 'question'),
       title: input.title || 'Câu hỏi mới',
       subtitle: input.subtitle || 'Câu nghe',
+      questionType: input.questionType || 'trueFalse',
       mode: input.mode || 'Chọn nghĩa',
       text: input.text || '你好。',
       pinyin: input.pinyin || 'ni hao.',
       vietnamese: input.vietnamese || 'Xin chào.',
       prompt: input.prompt || 'Người nói muốn diễn đạt điều gì?',
       options: input.options?.length ? input.options : ['Đáp án A', 'Đáp án B', 'Đáp án C', 'Đáp án D'],
+      optionImages: this.fourOptionImages(input.optionImages),
       answerIndex: input.answerIndex ?? 0,
       keyword: input.keyword || '你好',
+      imageUrl: input.imageUrl,
+      imageAlt: input.imageAlt,
       audioUrl: input.audioUrl,
       audioFileName: input.audioFileName,
     };
@@ -346,13 +488,20 @@ export class ListeningService {
     }
   }
 
+  private fourOptionImages(images?: string[]): string[] {
+    return Array.from({ length: 4 }, (_, index) => images?.[index] || '');
+  }
+
   private normalizeTopic(topic: ListeningTopic): ListeningTopic {
     if (topic.levels?.length) {
       return {
         ...topic,
         levels: topic.levels.map((level) => ({
           ...level,
-          sections: level.sections || [],
+          sections: (level.sections || []).map((section) => ({
+            ...section,
+            lessons: (section.lessons || []).map((lesson) => this.normalizeLesson(lesson)),
+          })),
         })),
         sections: undefined,
       };
@@ -366,10 +515,39 @@ export class ListeningService {
           id: `${topic.id}-default-level`,
           title: fallbackTitle,
           description: topic.subtitle || 'Cấp độ luyện nghe',
-          sections: topic.sections || [],
+          sections: (topic.sections || []).map((section) => ({
+            ...section,
+            lessons: (section.lessons || []).map((lesson) => this.normalizeLesson(lesson)),
+          })),
         },
       ],
       sections: undefined,
+    };
+  }
+
+  private normalizeLesson(lesson: ListeningLesson): ListeningLesson {
+    if (lesson.days?.length) {
+      return {
+        ...lesson,
+        days: lesson.days.map((day) => ({
+          ...day,
+          tracks: day.tracks || [],
+        })),
+        tracks: undefined,
+      };
+    }
+
+    return {
+      ...lesson,
+      days: [
+        {
+          id: `${lesson.id}-day-1`,
+          title: 'Ngày 1',
+          description: lesson.description || 'Bộ câu hỏi ngày 1',
+          tracks: lesson.tracks || [],
+        },
+      ],
+      tracks: undefined,
     };
   }
 
@@ -415,12 +593,49 @@ export class ListeningService {
     return lesson;
   }
 
-  private findTrack(lesson: ListeningLesson, trackId: string): ListeningTrack {
-    const track = lesson.tracks.find((item) => item.id === trackId);
-    if (!track) {
-      throw new NotFoundException('Question not found');
+  private daysOfLesson(lesson: ListeningLesson): ListeningDay[] {
+    lesson.days = this.normalizeLesson(lesson).days;
+    return lesson.days || [];
+  }
+
+  private ensureFirstDay(lesson: ListeningLesson): ListeningDay {
+    const days = this.daysOfLesson(lesson);
+    if (!days.length) {
+      throw new NotFoundException('Day not found');
     }
-    return track;
+    return days[0];
+  }
+
+  private findDay(lesson: ListeningLesson, dayId: string): ListeningDay {
+    const day = this.daysOfLesson(lesson).find((item) => item.id === dayId);
+    if (!day) {
+      throw new NotFoundException('Day not found');
+    }
+    return day;
+  }
+
+  private findTrack(lesson: ListeningLesson, trackId: string): ListeningTrack {
+    for (const day of this.daysOfLesson(lesson)) {
+      const track = day.tracks.find((item) => item.id === trackId);
+      if (track) {
+        return track;
+      }
+    }
+    throw new NotFoundException('Question not found');
+  }
+
+  private moveItem<T extends { id: string }>(items: T[], id: string, direction: 'up' | 'down', notFoundMessage: string): boolean {
+    const index = items.findIndex((item) => item.id === id);
+    if (index < 0) {
+      throw new NotFoundException(notFoundMessage);
+    }
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= items.length) {
+      return false;
+    }
+    const [item] = items.splice(index, 1);
+    items.splice(targetIndex, 0, item);
+    return true;
   }
 
   private uniqueId(seed: string): string {

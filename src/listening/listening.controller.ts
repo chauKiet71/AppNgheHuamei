@@ -91,6 +91,15 @@ export class ListeningController {
     return this.listeningService.deleteLevel(topicId, levelId);
   }
 
+  @Patch('topics/:topicId/levels/:levelId/move')
+  moveLevel(
+    @Param('topicId') topicId: string,
+    @Param('levelId') levelId: string,
+    @Body() body: { direction?: 'up' | 'down' },
+  ) {
+    return this.listeningService.moveLevel(topicId, levelId, body.direction === 'down' ? 'down' : 'up');
+  }
+
   @Post('topics/:topicId/levels/:levelId/sections')
   createSectionInLevel(
     @Param('topicId') topicId: string,
@@ -119,6 +128,16 @@ export class ListeningController {
     return this.listeningService.deleteSection(topicId, sectionId);
   }
 
+  @Patch('topics/:topicId/levels/:levelId/sections/:sectionId/move')
+  moveSection(
+    @Param('topicId') topicId: string,
+    @Param('levelId') levelId: string,
+    @Param('sectionId') sectionId: string,
+    @Body() body: { direction?: 'up' | 'down' },
+  ) {
+    return this.listeningService.moveSection(topicId, levelId, sectionId, body.direction === 'down' ? 'down' : 'up');
+  }
+
   @Post('topics/:topicId/sections/:sectionId/lessons')
   createLesson(
     @Param('topicId') topicId: string,
@@ -145,6 +164,59 @@ export class ListeningController {
     @Param('lessonId') lessonId: string,
   ) {
     return this.listeningService.deleteLesson(topicId, sectionId, lessonId);
+  }
+
+  @Post('topics/:topicId/sections/:sectionId/lessons/:lessonId/days')
+  createDay(
+    @Param('topicId') topicId: string,
+    @Param('sectionId') sectionId: string,
+    @Param('lessonId') lessonId: string,
+    @Body() body: Record<string, unknown>,
+  ) {
+    return this.listeningService.createDay(topicId, sectionId, lessonId, body);
+  }
+
+  @Patch('topics/:topicId/sections/:sectionId/lessons/:lessonId/days/:dayId')
+  updateDay(
+    @Param('topicId') topicId: string,
+    @Param('sectionId') sectionId: string,
+    @Param('lessonId') lessonId: string,
+    @Param('dayId') dayId: string,
+    @Body() body: Record<string, unknown>,
+  ) {
+    return this.listeningService.updateDay(topicId, sectionId, lessonId, dayId, body);
+  }
+
+  @Delete('topics/:topicId/sections/:sectionId/lessons/:lessonId/days/:dayId')
+  deleteDay(
+    @Param('topicId') topicId: string,
+    @Param('sectionId') sectionId: string,
+    @Param('lessonId') lessonId: string,
+    @Param('dayId') dayId: string,
+  ) {
+    return this.listeningService.deleteDay(topicId, sectionId, lessonId, dayId);
+  }
+
+  @Patch('topics/:topicId/sections/:sectionId/lessons/:lessonId/days/:dayId/move')
+  moveDay(
+    @Param('topicId') topicId: string,
+    @Param('sectionId') sectionId: string,
+    @Param('lessonId') lessonId: string,
+    @Param('dayId') dayId: string,
+    @Body() body: { direction?: 'up' | 'down' },
+  ) {
+    return this.listeningService.moveDay(topicId, sectionId, lessonId, dayId, body.direction === 'down' ? 'down' : 'up');
+  }
+
+  @Post('topics/:topicId/sections/:sectionId/lessons/:lessonId/days/:dayId/questions')
+  createTrackInDay(
+    @Param('topicId') topicId: string,
+    @Param('sectionId') sectionId: string,
+    @Param('lessonId') lessonId: string,
+    @Param('dayId') dayId: string,
+    @Body() body: Record<string, unknown>,
+  ) {
+    return this.listeningService.createTrack(topicId, sectionId, lessonId, body, dayId);
   }
 
   @Post('topics/:topicId/sections/:sectionId/lessons/:lessonId/questions')
@@ -208,7 +280,53 @@ export class ListeningController {
     return this.listeningService.attachTrackAudio(topicId, sectionId, lessonId, trackId, audio);
   }
 
+  @Post('topics/:topicId/sections/:sectionId/lessons/:lessonId/questions/:trackId/option-images/:optionIndex')
+  @UseInterceptors(
+    FileInterceptor('image', {
+      storage: memoryStorage(),
+      fileFilter: (_request, file, callback) => {
+        const allowedExtensions = ['.jpg', '.jpeg', '.png', '.webp', '.gif'];
+        const extension = extname(file.originalname).toLowerCase();
+        const isImageMime = file.mimetype.startsWith('image/');
+        const isAllowedExtension = allowedExtensions.includes(extension);
+        callback(null, isImageMime || isAllowedExtension);
+      },
+      limits: {
+        fileSize: 10 * 1024 * 1024,
+      },
+    }),
+  )
+  async uploadTrackOptionImage(
+    @Param('topicId') topicId: string,
+    @Param('sectionId') sectionId: string,
+    @Param('lessonId') lessonId: string,
+    @Param('trackId') trackId: string,
+    @Param('optionIndex') optionIndex: string,
+    @UploadedFile() file: MulterFile,
+  ): Promise<ListeningTrack> {
+    if (!file) {
+      throw new BadRequestException('Image file is required. Supported formats: jpg, png, webp, gif.');
+    }
+    const image = await this.uploadFileToCloudinary(file, {
+      folder: process.env.CLOUDINARY_IMAGE_FOLDER || 'app-nghe-v1/images',
+      resourceType: 'image',
+      fallbackMimeType: 'image/jpeg',
+    });
+    return this.listeningService.attachTrackOptionImage(topicId, sectionId, lessonId, trackId, Number(optionIndex), image.url);
+  }
+
   private async uploadAudioToCloudinary(file: MulterFile): Promise<{ fileName: string; url: string }> {
+    return this.uploadFileToCloudinary(file, {
+      folder: process.env.CLOUDINARY_AUDIO_FOLDER || 'app-nghe-v1/audio',
+      resourceType: 'video',
+      fallbackMimeType: 'audio/mpeg',
+    });
+  }
+
+  private async uploadFileToCloudinary(
+    file: MulterFile,
+    options: { folder: string; resourceType: 'image' | 'video'; fallbackMimeType: string },
+  ): Promise<{ fileName: string; url: string }> {
     const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
     const apiKey = process.env.CLOUDINARY_API_KEY;
     const apiSecret = process.env.CLOUDINARY_API_SECRET;
@@ -220,21 +338,21 @@ export class ListeningController {
     }
 
     const timestamp = Math.round(Date.now() / 1000).toString();
-    const folder = process.env.CLOUDINARY_AUDIO_FOLDER || 'app-nghe-v1/audio';
+    const folder = options.folder;
     const publicId = `${this.safeBaseName(file.originalname)}-${Date.now().toString(36)}`;
     const signature = this.signCloudinaryParams({ folder, public_id: publicId, timestamp }, apiSecret);
     const formData = new FormData();
-    const audioBytes = new Uint8Array(file.buffer);
-    const audioBlob = new Blob([audioBytes], { type: file.mimetype || 'audio/mpeg' });
+    const bytes = new Uint8Array(file.buffer);
+    const blob = new Blob([bytes], { type: file.mimetype || options.fallbackMimeType });
 
-    formData.append('file', audioBlob, file.originalname);
+    formData.append('file', blob, file.originalname);
     formData.append('api_key', apiKey);
     formData.append('timestamp', timestamp);
     formData.append('signature', signature);
     formData.append('folder', folder);
     formData.append('public_id', publicId);
 
-    const response = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/video/upload`, {
+    const response = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/${options.resourceType}/upload`, {
       method: 'POST',
       body: formData,
     });

@@ -32,6 +32,18 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
         updated_at timestamptz not null default now()
       )
     `);
+
+    await this.pool.query(`
+      create table if not exists app_users (
+        id text primary key,
+        name text not null,
+        email text not null unique,
+        password_hash text not null,
+        session_token text,
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now()
+      )
+    `);
   }
 
   async onModuleDestroy(): Promise<void> {

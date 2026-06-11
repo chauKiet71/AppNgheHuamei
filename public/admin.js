@@ -6,7 +6,9 @@ const state = {
   levelId: null,
   sectionId: null,
   lessonId: null,
+  dayId: null,
   questionId: null,
+  createQuestionType: 'image',
   toast: '',
   loadingAction: '',
   locale: 'vi',
@@ -38,6 +40,12 @@ const translations = {
     lessonSets: 'Bộ đề',
     question: 'Câu hỏi',
     questions: 'Câu hỏi',
+    createQuestion: 'Tạo câu hỏi',
+    questionType: 'Loại câu hỏi',
+    imageQuestion: 'Câu hỏi hình ảnh',
+    trueFalseQuestion: 'Câu hỏi đúng sai',
+    imageQuestionHint: 'Nghe audio rồi chọn 1 trong 4 ảnh A/B/C/D.',
+    trueFalseQuestionHint: 'Nghe audio rồi chọn Đúng hoặc Sai.',
     reload: 'Tải lại',
     emptyTopics: 'Chưa có chủ đề',
     noTopicSelected: 'Chưa chọn chủ đề',
@@ -77,6 +85,11 @@ const translations = {
     vietnameseMeaning: 'Nghĩa tiếng Việt',
     options: 'Các lựa chọn, mỗi dòng một đáp án',
     questionAudio: 'Audio câu hỏi',
+    optionImages: 'Ảnh đáp án A/B/C/D',
+    chooseImageFirst: 'Chọn file ảnh trước',
+    uploadImage: 'Tải ảnh',
+    uploadedImage: 'Đã tải ảnh',
+    uploadImageFailed: 'Tải ảnh không thành công',
     noAudio: 'Chưa tải audio. Hỗ trợ mp3, wav, m4a, webm, ogg, aac. Tối đa 50MB.',
     saveQuestion: 'Lưu câu hỏi',
     uploadAudio: 'Tải audio',
@@ -111,6 +124,12 @@ const translations = {
     lessonSets: '题组',
     question: '题目',
     questions: '题目',
+    createQuestion: '创建题目',
+    questionType: '题目类型',
+    imageQuestion: '图片题',
+    trueFalseQuestion: '判断题',
+    imageQuestionHint: '听音频后从 A/B/C/D 四张图中选择。',
+    trueFalseQuestionHint: '听音频后选择对或错。',
     reload: '重新加载',
     emptyTopics: '暂无主题',
     noTopicSelected: '未选择主题',
@@ -150,6 +169,11 @@ const translations = {
     vietnameseMeaning: '越南语意思',
     options: '选项，每行一个答案',
     questionAudio: '题目音频',
+    optionImages: 'A/B/C/D 答案图片',
+    chooseImageFirst: '请先选择图片文件',
+    uploadImage: '上传图片',
+    uploadedImage: '图片已上传',
+    uploadImageFailed: '上传图片失败',
     noAudio: '尚未上传音频。支持 mp3、wav、m4a、webm、ogg、aac，最大 50MB。',
     saveQuestion: '保存题目',
     uploadAudio: '上传音频',
@@ -206,13 +230,14 @@ async function loadTopics() {
     state.levelId = levelsOf(topic())[0]?.id || null;
   }
   if (!state.sectionId || !section()) {
-    state.sectionId = level()?.sections[0]?.id || null;
+    state.sectionId = sectionsOf(level())[0]?.id || null;
   }
-  if (!state.lessonId || !lesson()) {
-    state.lessonId = section()?.lessons[0]?.id || null;
+  state.lessonId = lessonsOf(section())[0]?.id || null;
+  if (!state.dayId || !day()) {
+    state.dayId = daysOf(lesson())[0]?.id || null;
   }
   if (!state.questionId || !question()) {
-    state.questionId = lesson()?.tracks[0]?.id || null;
+    state.questionId = tracksOfDay(day())[0]?.id || null;
   }
 }
 
@@ -221,7 +246,7 @@ function topic() {
 }
 
 function levelsOf(item) {
-  if (item?.levels?.length) {
+  if (Array.isArray(item?.levels) && item.levels.length) {
     return item.levels;
   }
   return [
@@ -229,9 +254,34 @@ function levelsOf(item) {
       id: `${item?.id || 'topic'}-default-level`,
       title: item?.id === 'hsk' ? 'HSK3' : 'Cơ bản',
       description: item?.subtitle || '',
-      sections: item?.sections || [],
+      sections: arrayOf(item?.sections),
     },
   ];
+}
+
+function arrayOf(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function sectionsOf(item) {
+  return arrayOf(item?.sections);
+}
+
+function lessonsOf(item) {
+  return arrayOf(item?.lessons);
+}
+
+function tracksOfDay(item) {
+  return arrayOf(item?.tracks);
+}
+
+function tracksOfLesson(item) {
+  return daysOf(item).flatMap((currentDay) => tracksOfDay(currentDay));
+}
+
+function optionImagesOf(item) {
+  const images = arrayOf(item?.optionImages);
+  return Array.from({ length: 4 }, (_, index) => images[index] || '');
 }
 
 function level() {
@@ -239,15 +289,36 @@ function level() {
 }
 
 function section() {
-  return level()?.sections.find((item) => item.id === state.sectionId);
+  return sectionsOf(level()).find((item) => item.id === state.sectionId);
 }
 
 function lesson() {
-  return section()?.lessons.find((item) => item.id === state.lessonId);
+  return lessonsOf(section()).find((item) => item.id === state.lessonId);
+}
+
+function daysOf(item) {
+  if (!item) {
+    return [];
+  }
+  if (Array.isArray(item?.days) && item.days.length) {
+    return item.days;
+  }
+  return [
+    {
+      id: `${item?.id || 'lesson'}-day-1`,
+      title: 'Ngày 1',
+      description: item?.description || '',
+      tracks: arrayOf(item?.tracks),
+    },
+  ];
+}
+
+function day() {
+  return daysOf(lesson()).find((item) => item.id === state.dayId) || daysOf(lesson())[0];
 }
 
 function question() {
-  return lesson()?.tracks.find((item) => item.id === state.questionId);
+  return tracksOfDay(day()).find((item) => item.id === state.questionId);
 }
 
 function icon(name, size = 16) {
@@ -515,30 +586,40 @@ async function mutate(path, method, body) {
 function selectTopic(id) {
   state.topicId = id;
   state.levelId = levelsOf(topic())[0]?.id || null;
-  state.sectionId = level()?.sections[0]?.id || null;
-  state.lessonId = section()?.lessons[0]?.id || null;
-  state.questionId = lesson()?.tracks[0]?.id || null;
+  state.sectionId = sectionsOf(level())[0]?.id || null;
+  state.lessonId = lessonsOf(section())[0]?.id || null;
+  state.dayId = daysOf(lesson())[0]?.id || null;
+  state.questionId = tracksOfDay(day())[0]?.id || null;
   render();
 }
 
 function selectLevel(id) {
   state.levelId = id;
-  state.sectionId = level()?.sections[0]?.id || null;
-  state.lessonId = section()?.lessons[0]?.id || null;
-  state.questionId = lesson()?.tracks[0]?.id || null;
+  state.sectionId = sectionsOf(level())[0]?.id || null;
+  state.lessonId = lessonsOf(section())[0]?.id || null;
+  state.dayId = daysOf(lesson())[0]?.id || null;
+  state.questionId = tracksOfDay(day())[0]?.id || null;
   render();
 }
 
 function selectSection(id) {
   state.sectionId = id;
-  state.lessonId = section()?.lessons[0]?.id || null;
-  state.questionId = lesson()?.tracks[0]?.id || null;
+  state.lessonId = lessonsOf(section())[0]?.id || null;
+  state.dayId = daysOf(lesson())[0]?.id || null;
+  state.questionId = tracksOfDay(day())[0]?.id || null;
   render();
 }
 
 function selectLesson(id) {
   state.lessonId = id;
-  state.questionId = lesson()?.tracks[0]?.id || null;
+  state.dayId = daysOf(lesson())[0]?.id || null;
+  state.questionId = tracksOfDay(day())[0]?.id || null;
+  render();
+}
+
+function selectDay(id) {
+  state.dayId = id;
+  state.questionId = tracksOfDay(day())[0]?.id || null;
   render();
 }
 
@@ -790,8 +871,8 @@ function render() {
           <div class="panel-head">
             <h3>${t('topicAndRoute')}</h3>
             <div class="actions">
-              <button class="btn ${isLoading('create-level') ? 'loading' : ''}" onclick="createLevel()" ${loadingAttrs('create-level')}>${loadingIcon('create-level', 'plus')} Cấp độ</button>
-              <button class="btn ${isLoading('create-section') ? 'loading' : ''}" onclick="createSection()" ${loadingAttrs('create-section')}>${loadingIcon('create-section', 'plus')} ${t('route')}</button>
+              <button class="btn ${isLoading('create-level') ? 'loading' : ''}" onclick="createLevel()" ${loadingAttrs('create-level')} ${currentTopic ? '' : 'disabled'}>${loadingIcon('create-level', 'plus')} Cấp độ</button>
+              <button class="btn ${isLoading('create-section') ? 'loading' : ''}" onclick="createSection()" ${loadingAttrs('create-section')} ${currentLevel ? '' : 'disabled'}>${loadingIcon('create-section', 'plus')} ${t('route')}</button>
             </div>
           </div>
           <div class="panel-body">
@@ -810,7 +891,7 @@ function render() {
         <section class="panel">
           <div class="panel-head">
             <h3>${t('lessonSetsInRoute')}</h3>
-            <button class="btn ${isLoading('create-lesson') ? 'loading' : ''}" onclick="createLesson()" ${loadingAttrs('create-lesson')}>${loadingIcon('create-lesson', 'plus')} ${t('lessonSet')}</button>
+            <button class="btn ${isLoading('create-lesson') ? 'loading' : ''}" onclick="createLesson()" ${loadingAttrs('create-lesson')} ${currentSection ? '' : 'disabled'}>${loadingIcon('create-lesson', 'plus')} ${t('lessonSet')}</button>
           </div>
           <div class="panel-body">
             ${sectionForm(currentSection)}
@@ -845,7 +926,7 @@ function render() {
 }
 
 function topicButton(item) {
-  const routeCount = levelsOf(item).reduce((total, current) => total + current.sections.length, 0);
+  const routeCount = levelsOf(item).reduce((total, current) => total + sectionsOf(current).length, 0);
   return `
     <button class="topic-item ${item.id === state.topicId ? 'active' : ''}" onclick="selectTopic('${item.id}')">
       <span><strong>${item.title}</strong><span class="muted">${levelsOf(item).length} cấp độ · ${routeCount} ${t('routes')}</span></span>
@@ -855,36 +936,54 @@ function topicButton(item) {
 }
 
 function levelButton(item) {
+  const sections = sectionsOf(item);
   return `
-    <button class="row-item ${item.id === state.levelId ? 'active' : ''}" onclick="selectLevel('${item.id}')">
-      <span><strong>${item.title}</strong><span class="muted">${item.sections.length} ${t('routes')}</span></span>
-      <span class="pill">${item.sections.length}</span>
-    </button>
+    <div class="row-item sortable-row ${item.id === state.levelId ? 'active' : ''}">
+      <button type="button" class="row-main" onclick="selectLevel('${item.id}')">
+        <span><strong>${item.title}</strong><span class="muted">${sections.length} ${t('routes')}</span></span>
+        <span class="pill">${sections.length}</span>
+      </button>
+      <div class="sort-actions">
+        <button type="button" class="icon-btn ${isLoading(`move-level-${item.id}-up`) ? 'loading' : ''}" onclick="moveLevel('${item.id}', 'up')" ${loadingAttrs(`move-level-${item.id}-up`)} title="Đưa lên">${loadingIcon(`move-level-${item.id}-up`, 'arrow-up')}</button>
+        <button type="button" class="icon-btn ${isLoading(`move-level-${item.id}-down`) ? 'loading' : ''}" onclick="moveLevel('${item.id}', 'down')" ${loadingAttrs(`move-level-${item.id}-down`)} title="Đưa xuống">${loadingIcon(`move-level-${item.id}-down`, 'arrow-down')}</button>
+      </div>
+    </div>
   `;
 }
 
 function sectionButton(item) {
+  const lessons = lessonsOf(item);
+  const days = lessons.flatMap((currentLesson) => daysOf(currentLesson));
+  const questions = lessons.flatMap((currentLesson) => tracksOfLesson(currentLesson));
   return `
-    <button class="row-item ${item.id === state.sectionId ? 'active' : ''}" onclick="selectSection('${item.id}')">
-      <span><strong>${item.title}</strong><span class="muted">${item.lessons.length} ${t('lessonSets')}</span></span>
-      <span class="pill">${item.icon}</span>
-    </button>
+    <div class="row-item sortable-row ${item.id === state.sectionId ? 'active' : ''}">
+      <button type="button" class="row-main" onclick="selectSection('${item.id}')">
+        <span><strong>${item.title}</strong><span class="muted">${days.length} ngày · ${questions.length} ${t('questions')}</span></span>
+        <span class="pill">${item.icon}</span>
+      </button>
+      <div class="sort-actions">
+        <button type="button" class="icon-btn ${isLoading(`move-section-${item.id}-up`) ? 'loading' : ''}" onclick="moveSection('${item.id}', 'up')" ${loadingAttrs(`move-section-${item.id}-up`)} title="Đưa lên">${loadingIcon(`move-section-${item.id}-up`, 'arrow-up')}</button>
+        <button type="button" class="icon-btn ${isLoading(`move-section-${item.id}-down`) ? 'loading' : ''}" onclick="moveSection('${item.id}', 'down')" ${loadingAttrs(`move-section-${item.id}-down`)} title="Đưa xuống">${loadingIcon(`move-section-${item.id}-down`, 'arrow-down')}</button>
+      </div>
+    </div>
   `;
 }
 
 function lessonButton(item) {
+  const tracks = tracksOfLesson(item);
   return `
     <button class="row-item ${item.id === state.lessonId ? 'active' : ''}" onclick="selectLesson('${item.id}')">
-      <span><strong>${item.title}</strong><span class="muted">${item.level} · ${item.tracks.length} ${t('sentences')}</span></span>
-      <span class="pill">${item.tracks.length}</span>
+      <span><strong>${item.title}</strong><span class="muted">${item.level} · ${tracks.length} ${t('sentences')}</span></span>
+      <span class="pill">${tracks.length}</span>
     </button>
   `;
 }
 
 function questionButton(item, index) {
+  const typeLabel = item.questionType === 'image' ? t('imageQuestion') : t('trueFalseQuestion');
   return `
     <button class="row-item ${item.id === state.questionId ? 'active' : ''}" onclick="selectQuestion('${item.id}')">
-      <span><strong>${index + 1}. ${item.title}</strong><span class="muted">${item.mode} · ${item.keyword}${item.audioUrl ? ` · ${t('hasAudio')}` : ''}</span></span>
+      <span><strong>${index + 1}. ${item.title}</strong><span class="muted">${typeLabel} · ${item.mode} · ${item.keyword}${item.audioUrl ? ` · ${t('hasAudio')}` : ''}</span></span>
       <span class="pill">${item.audioUrl ? t('audio') : item.answerIndex + 1}</span>
     </button>
   `;
@@ -893,20 +992,22 @@ function questionButton(item, index) {
 function metrics() {
   const topics = state.topics.length;
   const levels = state.topics.flatMap((item) => levelsOf(item));
-  const sections = levels.flatMap((item) => item.sections).length;
-  const lessons = levels.flatMap((item) => item.sections).flatMap((item) => item.lessons).length;
+  const sectionItems = levels.flatMap((item) => sectionsOf(item));
+  const lessonItems = sectionItems.flatMap((item) => lessonsOf(item));
+  const sections = sectionItems.length;
+  const days = lessonItems.flatMap((item) => daysOf(item)).length;
   const questions = state.topics
     .flatMap((item) => levelsOf(item))
-    .flatMap((item) => item.sections)
-    .flatMap((item) => item.lessons)
-    .flatMap((item) => item.tracks).length;
+    .flatMap((item) => sectionsOf(item))
+    .flatMap((item) => lessonsOf(item))
+    .flatMap((item) => tracksOfLesson(item)).length;
 
   return `
     <div class="metric-grid">
       <div class="metric"><span>${t('topics')}</span><strong>${topics}</strong></div>
       <div class="metric"><span>Cấp độ</span><strong>${levels.length}</strong></div>
       <div class="metric"><span>${t('routes')}</span><strong>${sections}</strong></div>
-      <div class="metric"><span>${t('lessonSets')}</span><strong>${lessons}</strong></div>
+      <div class="metric"><span>Ngày</span><strong>${days}</strong></div>
     </div>
   `;
 }
@@ -1122,8 +1223,9 @@ async function createTopic() {
     const created = await mutate('/topics', 'POST', { title: t('newTopic'), subtitle: t('listeningRoute'), icon: 'book' });
     state.topicId = created.id;
     state.levelId = levelsOf(created)[0]?.id || null;
-    state.sectionId = level()?.sections[0]?.id || null;
+    state.sectionId = sectionsOf(level())[0]?.id || null;
     state.lessonId = null;
+    state.dayId = null;
     state.questionId = null;
     await loadTopics();
   });
@@ -1146,6 +1248,10 @@ async function deleteTopic() {
     await mutate(`/topics/${state.topicId}`, 'DELETE');
     state.topicId = state.topics[0]?.id || null;
     state.levelId = levelsOf(topic())[0]?.id || null;
+    state.sectionId = sectionsOf(level())[0]?.id || null;
+    state.lessonId = lessonsOf(section())[0]?.id || null;
+    state.dayId = daysOf(lesson())[0]?.id || null;
+    state.questionId = tracksOfDay(day())[0]?.id || null;
     await loadTopics();
   });
 }
@@ -1179,9 +1285,23 @@ async function deleteLevel() {
   return withLoading('delete-level', async () => {
     await mutate(`/topics/${state.topicId}/levels/${state.levelId}`, 'DELETE');
     state.levelId = levelsOf(topic())[0]?.id || null;
-    state.sectionId = level()?.sections[0]?.id || null;
-    state.lessonId = section()?.lessons[0]?.id || null;
-    state.questionId = lesson()?.tracks[0]?.id || null;
+    state.sectionId = sectionsOf(level())[0]?.id || null;
+    state.lessonId = lessonsOf(section())[0]?.id || null;
+    state.dayId = daysOf(lesson())[0]?.id || null;
+    state.questionId = tracksOfDay(day())[0]?.id || null;
+    await loadTopics();
+  });
+}
+
+async function moveLevel(levelId, direction) {
+  if (!topic()) return;
+  return withLoading(`move-level-${levelId}-${direction}`, async () => {
+    await mutate(`/topics/${state.topicId}/levels/${levelId}/move`, 'PATCH', { direction });
+    state.levelId = levelId;
+    state.sectionId = sectionsOf(level())[0]?.id || null;
+    state.lessonId = lessonsOf(section())[0]?.id || null;
+    state.dayId = daysOf(lesson())[0]?.id || null;
+    state.questionId = tracksOfDay(day())[0]?.id || null;
     await loadTopics();
   });
 }
@@ -1195,6 +1315,7 @@ async function createSection() {
     });
     state.sectionId = created.id;
     state.lessonId = null;
+    state.dayId = null;
     state.questionId = null;
     await loadTopics();
   });
@@ -1214,9 +1335,48 @@ async function deleteSection() {
   if (!section() || !confirm(t('confirmDeleteRoute'))) return;
   return withLoading('delete-section', async () => {
     await mutate(`/topics/${state.topicId}/sections/${state.sectionId}`, 'DELETE');
-    state.sectionId = level()?.sections[0]?.id || null;
+    state.sectionId = sectionsOf(level())[0]?.id || null;
+    state.lessonId = lessonsOf(section())[0]?.id || null;
+    state.dayId = daysOf(lesson())[0]?.id || null;
+    state.questionId = tracksOfDay(day())[0]?.id || null;
     await loadTopics();
   });
+}
+
+async function moveSection(sectionId, direction) {
+  if (!level()) return;
+  return withLoading(`move-section-${sectionId}-${direction}`, async () => {
+    await mutate(`/topics/${state.topicId}/levels/${state.levelId}/sections/${sectionId}/move`, 'PATCH', { direction });
+    state.sectionId = sectionId;
+    state.lessonId = lessonsOf(section())[0]?.id || null;
+    state.dayId = daysOf(lesson())[0]?.id || null;
+    state.questionId = tracksOfDay(day())[0]?.id || null;
+    await loadTopics();
+  });
+}
+
+async function ensureRouteLesson() {
+  if (lesson()) return lesson();
+  if (!section()) {
+    showToast('Hãy chọn hoặc tạo lộ trình trước');
+    render();
+    return null;
+  }
+  const created = await mutate(`/topics/${state.topicId}/sections/${state.sectionId}/lessons`, 'POST', {
+    title: textOrFallback(value('section-title'), textOrFallback(section()?.title, 'Nội dung lộ trình')),
+    level: level()?.title || 'HSK',
+    goal: section()?.title || 'Luyện nghe',
+    description: section()?.description || 'Nội dung luyện nghe theo ngày',
+  });
+  state.lessonId = created.id;
+  state.dayId = daysOf(created)[0]?.id || null;
+  state.questionId = tracksOfDay(day())[0]?.id || null;
+  await loadTopics();
+  return lesson();
+}
+
+function textOrFallback(value, fallback) {
+  return String(value || '').trim() || fallback;
 }
 
 async function createLesson() {
@@ -1228,6 +1388,7 @@ async function createLesson() {
       goal: t('listeningPractice'),
     });
     state.lessonId = created.id;
+    state.dayId = daysOf(created)[0]?.id || null;
     state.questionId = null;
     await loadTopics();
   });
@@ -1250,37 +1411,145 @@ async function deleteLesson() {
   if (!lesson() || !confirm(t('confirmDeleteLessonSet'))) return;
   return withLoading('delete-lesson', async () => {
     await mutate(`/topics/${state.topicId}/sections/${state.sectionId}/lessons/${state.lessonId}`, 'DELETE');
-    state.lessonId = section()?.lessons[0]?.id || null;
+    state.lessonId = lessonsOf(section())[0]?.id || null;
+    state.dayId = daysOf(lesson())[0]?.id || null;
+    state.questionId = tracksOfDay(day())[0]?.id || null;
     await loadTopics();
   });
 }
 
-async function createQuestion() {
-  if (!lesson()) return;
-  return withLoading('create-question', async () => {
-    const created = await mutate(`/topics/${state.topicId}/sections/${state.sectionId}/lessons/${state.lessonId}/questions`, 'POST', {
-      title: `${t('numberedQuestion')} ${lesson().tracks.length + 1}`,
+async function createDay() {
+  if (!lesson()) {
+    await ensureRouteLesson();
+    return;
+  }
+  return withLoading('create-day', async () => {
+    const created = await mutate(`/topics/${state.topicId}/sections/${state.sectionId}/lessons/${state.lessonId}/days`, 'POST', {
+      title: `Ngày ${daysOf(lesson()).length + 1}`,
+      description: 'Bộ câu hỏi luyện tập',
     });
+    state.dayId = created.id;
+    state.questionId = null;
+    await loadTopics();
+  });
+}
+
+async function saveDay() {
+  await ensureRouteLesson();
+  if (!day()) return;
+  const body = {
+    title: value('day-title'),
+    description: value('day-description'),
+  };
+  return withLoading('save-day', () =>
+    mutate(`/topics/${state.topicId}/sections/${state.sectionId}/lessons/${state.lessonId}/days/${state.dayId}`, 'PATCH', body),
+  );
+}
+
+async function deleteDay() {
+  if (!day() || !confirm('Xóa ngày này và toàn bộ câu hỏi bên trong?')) return;
+  return withLoading('delete-day', async () => {
+    await mutate(`/topics/${state.topicId}/sections/${state.sectionId}/lessons/${state.lessonId}/days/${state.dayId}`, 'DELETE');
+    state.dayId = daysOf(lesson())[0]?.id || null;
+    state.questionId = tracksOfDay(day())[0]?.id || null;
+    await loadTopics();
+  });
+}
+
+async function moveDay(dayId, direction) {
+  if (!lesson()) return;
+  return withLoading(`move-day-${dayId}-${direction}`, async () => {
+    await mutate(
+      `/topics/${state.topicId}/sections/${state.sectionId}/lessons/${state.lessonId}/days/${dayId}/move`,
+      'PATCH',
+      { direction },
+    );
+    state.dayId = dayId;
+    state.questionId = tracksOfDay(day())[0]?.id || null;
+    await loadTopics();
+  });
+}
+
+function selectCreateQuestionType(questionType) {
+  state.createQuestionType = questionType;
+  render();
+}
+
+async function createQuestion(questionType = state.createQuestionType || 'image') {
+  if (!lesson()) {
+    await ensureRouteLesson();
+  }
+  if (!day()) {
+    await createDay();
+  }
+  if (!lesson() || !day()) return;
+  return withLoading(`create-question-${questionType}`, async () => {
+    const created = await mutate(
+      `/topics/${state.topicId}/sections/${state.sectionId}/lessons/${state.lessonId}/days/${state.dayId}/questions`,
+      'POST',
+      {
+        title: `${t('numberedQuestion')} ${tracksOfDay(day()).length + 1}`,
+        questionType,
+        mode: questionType === 'image' ? 'Câu hỏi hình ảnh' : 'Câu hỏi đúng sai',
+        prompt: questionType === 'image' ? 'Quan sát hình và chọn đáp án đúng.' : 'Nghe và chọn đáp án đúng.',
+        options: questionType === 'image' ? ['Đáp án A', 'Đáp án B', 'Đáp án C', 'Đáp án D'] : ['Đúng', 'Sai'],
+        optionImages: ['', '', '', ''],
+      },
+    );
     state.questionId = created.id;
     await loadTopics();
   });
 }
 
+function setQuestionType(questionType) {
+  const current = question();
+  if (!current) return;
+  current.questionType = questionType;
+  if (questionType === 'trueFalse' && arrayOf(current.options).length > 2) {
+    current.options = ['Đúng', 'Sai'];
+    current.answerIndex = 0;
+  }
+  if (questionType === 'image') {
+    current.options = arrayOf(current.options).length >= 4 ? current.options.slice(0, 4) : ['Đáp án A', 'Đáp án B', 'Đáp án C', 'Đáp án D'];
+    current.optionImages = optionImagesOf(current);
+  }
+  render();
+}
+
+function setAnswerIndex(index) {
+  const current = question();
+  if (!current) return;
+  current.answerIndex = index;
+  const answerInput = document.getElementById('q-answer');
+  if (answerInput) {
+    answerInput.value = String(index + 1);
+  }
+  render();
+}
+
 async function saveQuestion() {
   if (!question()) return;
-  const options = value('q-options')
-    .split('\n')
-    .map((item) => item.trim())
-    .filter(Boolean);
+  const currentQuestion = question();
+  const isImageQuestion = (currentQuestion.questionType || 'trueFalse') === 'image';
+  const options = isImageQuestion
+    ? [0, 1, 2, 3].map((index) => value(`q-option-label-${index}`) || `Đáp án ${String.fromCharCode(65 + index)}`)
+    : value('q-options')
+        .split('\n')
+        .map((item) => item.trim())
+        .filter(Boolean);
   const body = {
     title: value('q-title'),
+    questionType: question().questionType || 'trueFalse',
     mode: value('q-mode'),
     text: value('q-text'),
     pinyin: value('q-pinyin'),
     keyword: value('q-keyword'),
-    answerIndex: Math.max(0, Number(value('q-answer')) - 1),
+    answerIndex: Math.max(0, Math.min(options.length - 1, Number(value('q-answer')) - 1)),
     prompt: value('q-prompt'),
     vietnamese: value('q-vietnamese'),
+    imageUrl: value('q-image-url'),
+    imageAlt: value('q-image-alt'),
+    optionImages: isImageQuestion ? [0, 1, 2, 3].map((index) => value(`q-option-image-${index}`)) : optionImagesOf(currentQuestion),
     options,
   };
   return withLoading('save-question', () =>
@@ -1322,6 +1591,36 @@ async function uploadQuestionAudio() {
   });
 }
 
+async function uploadQuestionOptionImage(index) {
+  if (!question()) return;
+  const input = document.getElementById(`q-option-file-${index}`);
+  const file = input?.files?.[0];
+  if (!file) {
+    showToast(t('chooseImageFirst'));
+    render();
+    return;
+  }
+
+  return withLoading(`upload-image-${index}`, async () => {
+    const formData = new FormData();
+    formData.append('image', file);
+    const response = await fetch(
+      `${apiBase}/topics/${state.topicId}/sections/${state.sectionId}/lessons/${state.lessonId}/questions/${state.questionId}/option-images/${index}`,
+      {
+        method: 'POST',
+        body: formData,
+      },
+    );
+    if (!response.ok) {
+      const errorText = await response.text();
+      showToast(response.status === 404 ? t('staleUploadRoute') : t('uploadImageFailed'));
+      throw new Error(errorText);
+    }
+    await loadTopics();
+    showToast(t('uploadedImage'));
+  });
+}
+
 async function deleteQuestion() {
   if (!question() || !confirm(t('confirmDeleteQuestion'))) return;
   return withLoading('delete-question', async () => {
@@ -1338,6 +1637,249 @@ async function refreshData() {
   });
 }
 
+function dayButton(item) {
+  const tracks = tracksOfDay(item);
+  return `
+    <div class="row-item day-row ${item.id === state.dayId ? 'active' : ''}">
+      <button type="button" class="row-main" onclick="selectDay('${item.id}')">
+        <span><strong>${item.title}</strong><span class="muted">${tracks.length} ${t('questions')}</span></span>
+        <span class="pill">${tracks.length}</span>
+      </button>
+      <div class="sort-actions">
+        <button type="button" class="icon-btn ${isLoading(`move-day-${item.id}-up`) ? 'loading' : ''}" onclick="moveDay('${item.id}', 'up')" ${loadingAttrs(`move-day-${item.id}-up`)} title="Đưa lên">${loadingIcon(`move-day-${item.id}-up`, 'arrow-up')}</button>
+        <button type="button" class="icon-btn ${isLoading(`move-day-${item.id}-down`) ? 'loading' : ''}" onclick="moveDay('${item.id}', 'down')" ${loadingAttrs(`move-day-${item.id}-down`)} title="Đưa xuống">${loadingIcon(`move-day-${item.id}-down`, 'arrow-down')}</button>
+      </div>
+    </div>
+  `;
+}
+
+function dayForm(item) {
+  if (!section()) return '<div class="empty">Chọn hoặc tạo lộ trình trước, sau đó mới tạo ngày.</div>';
+  if (!item) return '<div class="empty">Chọn hoặc tạo ngày</div>';
+  return `
+    <form id="day-form" class="form-grid single">
+      ${input('day-title', 'Tên ngày', item.title)}
+      ${textarea('day-description', 'Mô tả ngày', item.description)}
+      <div class="form-actions">
+        <button type="button" class="btn primary ${isLoading('save-day') ? 'loading' : ''}" onclick="saveDay()" ${loadingAttrs('save-day')}>${loadingIcon('save-day', 'save')} Lưu ngày</button>
+        <button type="button" class="btn danger ${isLoading('delete-day') ? 'loading' : ''}" onclick="deleteDay()" ${loadingAttrs('delete-day')}>${loadingIcon('delete-day', 'trash')}</button>
+      </div>
+    </form>
+  `;
+}
+
+function questionTypeTabs(item) {
+  const type = item?.questionType || 'trueFalse';
+  return `
+    <div class="question-type-tabs">
+      <button type="button" class="${type === 'trueFalse' ? 'active' : ''}" onclick="setQuestionType('trueFalse')">Đúng sai</button>
+      <button type="button" class="${type === 'image' ? 'active' : ''}" onclick="setQuestionType('image')">Hình ảnh</button>
+    </div>
+  `;
+}
+
+function questionCreatePicker(currentDay) {
+  const selectedType = state.createQuestionType || 'image';
+  return `
+    <div class="question-create-box">
+      <div class="section-title">${t('questionType')}</div>
+      <div class="question-create-options">
+        <button type="button" class="${selectedType === 'image' ? 'active' : ''}" onclick="selectCreateQuestionType('image')" ${currentDay ? '' : 'disabled'}>
+          <strong>${t('imageQuestion')}</strong>
+          <span>${t('imageQuestionHint')}</span>
+        </button>
+        <button type="button" class="${selectedType === 'trueFalse' ? 'active' : ''}" onclick="selectCreateQuestionType('trueFalse')" ${currentDay ? '' : 'disabled'}>
+          <strong>${t('trueFalseQuestion')}</strong>
+          <span>${t('trueFalseQuestionHint')}</span>
+        </button>
+      </div>
+      <button class="btn primary ${isLoading(`create-question-${selectedType}`) ? 'loading' : ''}" onclick="createQuestion()" ${loadingAttrs(`create-question-${selectedType}`)} ${currentDay ? '' : 'disabled'}>
+        ${loadingIcon(`create-question-${selectedType}`, 'plus')} ${t('createQuestion')}
+      </button>
+    </div>
+  `;
+}
+
+function optionImageFields(item, options) {
+  const images = optionImagesOf(item);
+  return `
+    <section class="option-image-admin" style="grid-column:1 / -1">
+      <div class="section-title">${t('optionImages')}</div>
+      <div class="option-image-grid">
+        ${[0, 1, 2, 3]
+          .map(
+            (index) => `
+              <div class="option-image-card ${item.answerIndex === index ? 'correct' : ''}">
+                <div class="option-image-head">
+                  <span>${String.fromCharCode(65 + index)}</span>
+                  <label class="answer-radio">
+                    <input type="radio" name="q-answer-radio" ${item.answerIndex === index ? 'checked' : ''} onchange="setAnswerIndex(${index})" />
+                    Đúng
+                  </label>
+                </div>
+                <div class="option-image-preview">
+                  ${
+                    images[index]
+                      ? `<img src="${escapeAttr(images[index])}" alt="${escapeAttr(options[index] || `Đáp án ${String.fromCharCode(65 + index)}`)}" />`
+                      : `<div class="image-placeholder">${icon('book', 24)}<span>Ảnh ${String.fromCharCode(65 + index)}</span></div>`
+                  }
+                </div>
+                <label>Đáp án ${String.fromCharCode(65 + index)}
+                  <input id="q-option-label-${index}" type="text" value="${escapeAttr(options[index] || '')}" />
+                </label>
+                <label>URL ảnh ${String.fromCharCode(65 + index)}
+                  <input id="q-option-image-${index}" type="url" value="${escapeAttr(images[index])}" placeholder="https://..." />
+                </label>
+                <label>File ảnh
+                  <input id="q-option-file-${index}" type="file" accept="image/*" />
+                </label>
+                <button type="button" class="btn ${isLoading(`upload-image-${index}`) ? 'loading' : ''}" onclick="uploadQuestionOptionImage(${index})" ${loadingAttrs(`upload-image-${index}`)}>
+                  ${loadingIcon(`upload-image-${index}`, 'save')} ${t('uploadImage')} ${String.fromCharCode(65 + index)}
+                </button>
+              </div>
+            `,
+          )
+          .join('')}
+      </div>
+    </section>
+  `;
+}
+
+function questionForm(item) {
+  if (!item) return `<div class="empty">${t('chooseOrCreateQuestion')}</div>`;
+  const questionType = item.questionType || 'trueFalse';
+  const options = questionType === 'image' ? Array.from({ length: 4 }, (_, index) => arrayOf(item.options)[index] || `Đáp án ${String.fromCharCode(65 + index)}`) : arrayOf(item.options);
+  return `
+    <form id="question-form" class="form-grid ${questionType === 'image' ? 'image-question-form' : ''}">
+      <div style="grid-column:1 / -1">${questionTypeTabs(item)}</div>
+      ${input('q-title', t('questionName'), item.title)}
+      ${input('q-mode', t('questionMode'), item.mode)}
+      ${
+        questionType === 'image'
+          ? optionImageFields(item, options)
+          : ''
+      }
+      ${input('q-text', 'Nội dung nghe/đáp án', item.text)}
+      ${input('q-pinyin', 'Pinyin', item.pinyin)}
+      ${input('q-keyword', t('keyword'), item.keyword)}
+      ${input('q-answer', t('correctAnswer'), String(item.answerIndex + 1), 'number')}
+      ${textarea('q-prompt', t('visiblePrompt'), item.prompt)}
+      ${textarea('q-vietnamese', t('vietnameseMeaning'), item.vietnamese)}
+      ${
+        questionType === 'image'
+          ? `<input id="q-image-url" type="hidden" value="${escapeAttr(item.imageUrl || '')}" /><input id="q-image-alt" type="hidden" value="${escapeAttr(item.imageAlt || '')}" /><textarea id="q-options" style="display:none">${escapeHtml(options.join('\n'))}</textarea>`
+          : textarea('q-options', t('options'), options.join('\n'))
+      }
+      <label style="grid-column:1 / -1">${t('questionAudio')}
+        <input id="q-audio" type="file" accept="audio/*" />
+      </label>
+      <div style="grid-column:1 / -1">
+        ${
+          item.audioUrl
+            ? `<audio controls src="${item.audioUrl}" style="width:100%;height:38px"></audio><p class="muted" style="margin:6px 0 0">${item.audioFileName || item.audioUrl}</p>`
+            : `<p class="muted" style="margin:0">${t('noAudio')}</p>`
+        }
+      </div>
+      <div class="form-actions" style="grid-column:1 / -1">
+        <button type="button" class="btn primary ${isLoading('save-question') ? 'loading' : ''}" onclick="saveQuestion()" ${loadingAttrs('save-question')}>${loadingIcon('save-question', 'save')} ${t('saveQuestion')}</button>
+        <button type="button" class="btn ${isLoading('upload-audio') ? 'loading' : ''}" onclick="uploadQuestionAudio()" ${loadingAttrs('upload-audio')}>${loadingIcon('upload-audio', 'save')} ${t('uploadAudio')}</button>
+        <button type="button" class="btn danger ${isLoading('delete-question') ? 'loading' : ''}" onclick="deleteQuestion()" ${loadingAttrs('delete-question')}>${loadingIcon('delete-question', 'trash')} ${t('deleteQuestion')}</button>
+      </div>
+    </form>
+  `;
+}
+
+function render() {
+  const currentTopic = topic();
+  const currentLevel = level();
+  const currentSection = section();
+  const currentLesson = lesson();
+  const currentDay = day();
+
+  mount(`
+    <aside class="sidebar">
+      <div class="brand">
+        <div>
+          <h1>${t('adminTitle')}</h1>
+          <p class="muted">${t('adminSubtitle')}</p>
+        </div>
+        ${languageToggle()}
+      </div>
+      <div class="actions" style="margin-bottom:14px">
+        <button class="btn primary ${isLoading('create-topic') ? 'loading' : ''}" onclick="createTopic()" ${loadingAttrs('create-topic')}>${loadingIcon('create-topic', 'plus')} ${t('topic')}</button>
+        <button class="btn ghost ${isLoading('refresh') ? 'loading' : ''}" onclick="refreshData()" ${loadingAttrs('refresh')}>${loadingIcon('refresh', 'refresh')} ${t('reload')}</button>
+      </div>
+      <div class="topic-list">
+        ${state.topics.map(topicButton).join('') || `<div class="empty">${t('emptyTopics')}</div>`}
+      </div>
+    </aside>
+
+    <section class="main">
+      <div class="topbar">
+        <div>
+          <h2>${currentTopic?.title || t('noTopicSelected')}</h2>
+          <p class="muted">${currentTopic?.description || t('createTopicHint')}</p>
+        </div>
+        <div class="actions">
+          <a class="btn ghost" href="/" target="_blank">${icon('book')} ${t('viewMobile')}</a>
+          <button class="btn primary ${isLoading('save-topic') ? 'loading' : ''}" onclick="saveTopic()" ${loadingAttrs('save-topic')}>${loadingIcon('save-topic', 'save')} ${t('saveTopic')}</button>
+          <button class="btn danger ${isLoading('delete-topic') ? 'loading' : ''}" onclick="deleteTopic()" ${loadingAttrs('delete-topic')}>${loadingIcon('delete-topic', 'trash')} ${t('deleteTopic')}</button>
+        </div>
+      </div>
+      ${metrics()}
+      <div class="workspace admin-workspace-wide">
+        <section class="panel">
+          <div class="panel-head">
+            <h3>Chủ đề, cấp độ, lộ trình</h3>
+            <div class="actions">
+              <button class="btn ${isLoading('create-level') ? 'loading' : ''}" onclick="createLevel()" ${loadingAttrs('create-level')} ${currentTopic ? '' : 'disabled'}>${loadingIcon('create-level', 'plus')} Cấp độ</button>
+              <button class="btn ${isLoading('create-section') ? 'loading' : ''}" onclick="createSection()" ${loadingAttrs('create-section')} ${currentLevel ? '' : 'disabled'}>${loadingIcon('create-section', 'plus')} ${t('route')}</button>
+            </div>
+          </div>
+          <div class="panel-body">
+            ${topicForm(currentTopic)}
+            <p class="section-title">Cấp độ</p>
+            <div class="stack">${levelsOf(currentTopic).map(levelButton).join('') || '<div class="empty">Chưa có cấp độ</div>'}</div>
+            ${levelForm(currentLevel)}
+            <p class="section-title">${t('routes')}</p>
+            <div class="stack">${sectionsOf(currentLevel).map(sectionButton).join('') || `<div class="empty">${t('emptyRoutes')}</div>`}</div>
+            ${sectionForm(currentSection)}
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h3>Tạo ngày</h3>
+            <button class="btn ${isLoading('create-day') ? 'loading' : ''}" onclick="createDay()" ${loadingAttrs('create-day')} ${currentSection ? '' : 'disabled'}>${loadingIcon('create-day', 'plus')} Ngày</button>
+          </div>
+          <div class="panel-body">
+            ${dayForm(currentDay)}
+            <div class="stack" style="margin-top:14px">
+              ${daysOf(currentLesson).map(dayButton).join('') || '<div class="empty">Chưa có ngày</div>'}
+            </div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h3>${t('questionBank')}</h3>
+          </div>
+          <div class="panel-body">
+            ${questionCreatePicker(currentDay)}
+            <div class="question-editor">
+              <div class="question-list stack">
+              ${tracksOfDay(currentDay).map(questionButton).join('') || `<div class="empty">${t('emptyQuestions')}</div>`}
+              </div>
+              ${questionForm(question())}
+            </div>
+          </div>
+        </section>
+      </div>
+    </section>
+    ${state.toast ? `<div class="toast">${state.toast}</div>` : ''}
+  `);
+}
+
 Object.assign(window, {
   createTopic,
   saveTopic,
@@ -1346,20 +1888,31 @@ Object.assign(window, {
   createLevel,
   saveLevel,
   deleteLevel,
+  moveLevel,
   saveSection,
   deleteSection,
+  moveSection,
   createLesson,
   saveLesson,
   deleteLesson,
+  createDay,
+  saveDay,
+  deleteDay,
+  moveDay,
   createQuestion,
   saveQuestion,
   uploadQuestionAudio,
+  uploadQuestionOptionImage,
   deleteQuestion,
   selectTopic,
   selectLevel,
   selectSection,
   selectLesson,
+  selectDay,
   selectQuestion,
+  selectCreateQuestionType,
+  setQuestionType,
+  setAnswerIndex,
   refreshData,
   toggleAdminLanguage,
 });

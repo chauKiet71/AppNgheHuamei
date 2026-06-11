@@ -4,6 +4,7 @@ const state = {
   levelId: null,
   sectionId: null,
   lessonId: null,
+  dayId: null,
   screen: 'home',
   index: 0,
   answers: [],
@@ -17,6 +18,10 @@ const state = {
   audioElement: null,
   sessionStartedAt: null,
   locale: 'vi',
+  authToken: localStorage.getItem('authToken') || '',
+  user: null,
+  authLoading: false,
+  authError: '',
 };
 
 const iconMap = {
@@ -40,6 +45,14 @@ const iconMap = {
   practice: 'square-pen',
   history: 'clock-3',
   lock: 'lock',
+  mail: 'mail',
+  eye: 'eye',
+  sync: 'refresh-cw',
+  translate: 'languages',
+  graduation: 'graduation-cap',
+  goal: 'target',
+  grid: 'grid-2x2',
+  crown: 'crown',
   arrowRight: 'arrow-right',
   back: 'arrow-left',
   check: 'check',
@@ -64,8 +77,13 @@ const translations = {
     scope: 'Phạm vi V0: HSK2-HSK4 · 4 chủ đề hằng ngày · 5 bối cảnh công việc',
     chooseTopic: 'Chọn chủ đề nghe',
     chooseTopicSub: 'Chọn lộ trình phù hợp để luyện tập',
+    chooseLevel: 'Chọn cấp độ',
+    chooseDay: 'Chọn ngày luyện',
+    imageQuestion: 'Câu hỏi hình ảnh',
+    trueFalseQuestion: 'Câu hỏi đúng sai',
+    noQuestions: 'Chưa có câu hỏi cho mục này',
     daily: 'Hằng ngày',
-    chooseSection: 'Chọn chuyên đề nghe',
+    chooseSection: 'Chọn lộ trình nghe',
     startTopic: 'Bắt đầu luyện chủ đề',
     listen: 'Nghe',
     chooseMeaning: 'Chọn nghĩa',
@@ -110,6 +128,35 @@ const translations = {
     loadError: 'Không tải được dữ liệu bài nghe. Vui lòng thử lại.',
     noAudio: 'Chưa có audio cho câu này',
     audioLoadError: 'Không phát được file audio. Vui lòng kiểm tra lại file đã tải lên.',
+    login: 'Đăng nhập',
+    upgradePro: 'NÂNG CẤP LÊN PRO!',
+    proHint: 'Để sử dụng đầy đủ các chức năng',
+    settings: 'Cài đặt',
+    syncExtension: 'Đồng bộ Extension',
+    nativeLanguage: 'Ngôn ngữ mẹ đẻ',
+    levelSetting: 'Trình độ',
+    goalSetting: 'Mục tiêu',
+    topicSetting: 'Các chủ đề',
+    loginSubtitle: 'Nhập email và mật khẩu để đăng nhập',
+    email: 'Email',
+    password: 'Mật khẩu',
+    forgotPassword: 'Quên mật khẩu?',
+    or: 'Hoặc',
+    noAccount: 'Chưa có tài khoản?',
+    signup: 'Đăng ký',
+    registerSubtitle: 'Tạo tài khoản để tiếp tục',
+    fullName: 'Họ và tên',
+    alreadyHaveAccount: 'Đã có tài khoản?',
+    agreeTerms: 'Tôi đồng ý với',
+    termsOfService: 'Điều khoản dịch vụ',
+    privacyPolicy: 'Chính sách bảo mật',
+    logout: 'Đăng xuất',
+    welcomeBack: 'Xin chào',
+    authRequired: 'Vui lòng nhập đầy đủ thông tin.',
+    loginSuccess: 'Đăng nhập thành công.',
+    registerSuccess: 'Tạo tài khoản thành công.',
+    loggingIn: 'Đang đăng nhập...',
+    registering: 'Đang tạo tài khoản...',
   },
   zh: {
     home: '首页',
@@ -125,6 +172,11 @@ const translations = {
     scope: 'V0 范围：HSK2-HSK4 · 4 个日常主题 · 5 个工作场景',
     chooseTopic: '选择听力主题',
     chooseTopicSub: '选择适合你的练习路线',
+    chooseLevel: '选择等级',
+    chooseDay: '选择练习日',
+    imageQuestion: '图片题',
+    trueFalseQuestion: '判断题',
+    noQuestions: '此项目暂无题目',
     daily: '日常',
     chooseSection: '选择专项练习',
     startTopic: '开始主题练习',
@@ -171,6 +223,35 @@ const translations = {
     loadError: '无法加载听力数据，请重试。',
     noAudio: '本题还没有音频',
     audioLoadError: '无法播放音频文件，请检查已上传的文件。',
+    login: '登录',
+    upgradePro: '升级到 PRO!',
+    proHint: '解锁完整功能',
+    settings: '设置',
+    syncExtension: '同步扩展',
+    nativeLanguage: '母语',
+    levelSetting: '等级',
+    goalSetting: '目标',
+    topicSetting: '主题',
+    loginSubtitle: '输入邮箱和密码登录',
+    email: '邮箱',
+    password: '密码',
+    forgotPassword: '忘记密码？',
+    or: '或',
+    noAccount: '还没有账号？',
+    signup: '注册',
+    registerSubtitle: '创建账号以继续',
+    fullName: '姓名',
+    alreadyHaveAccount: '已有账号？',
+    agreeTerms: '我同意',
+    termsOfService: '服务条款',
+    privacyPolicy: '隐私政策',
+    logout: '退出登录',
+    welcomeBack: '你好',
+    authRequired: '请填写完整信息。',
+    loginSuccess: '登录成功。',
+    registerSuccess: '注册成功。',
+    loggingIn: '正在登录...',
+    registering: '正在创建账号...',
   },
 };
 
@@ -358,7 +439,19 @@ function trackText(track, field) {
 }
 
 function trackOptions(track) {
+  if (track.questionType === 'image') {
+    return track.options;
+  }
   return localizedContent[state.locale]?.phrases?.[phraseKey(track)]?.options || track.options;
+}
+
+function optionImagesOf(track) {
+  const images = Array.isArray(track.optionImages) ? track.optionImages : [];
+  return Array.from({ length: 4 }, (_, index) => images[index] || '');
+}
+
+function isImageQuestion(track) {
+  return track.questionType === 'image' && optionImagesOf(track).some(Boolean);
 }
 
 function modeOf(track) {
@@ -380,19 +473,41 @@ function toggleLanguage() {
 }
 
 async function init() {
+  await loadCurrentUser();
+  await loadTopics();
+  render();
+}
+
+async function loadTopics() {
   const response = await fetch('/api/listening/topics');
   state.topics = await response.json();
-  state.topicId = state.topics[0]?.id || null;
-  state.levelId = levelsOf(state.topics[0])?.[0]?.id || null;
-  render();
+  if (!state.topicId || !currentTopic()) {
+    state.topicId = state.topics[0]?.id || null;
+  }
+  if (!state.levelId || !currentLevel()) {
+    state.levelId = levelsOf(currentTopic())?.[0]?.id || null;
+  }
+  if (!state.sectionId || !currentSection()) {
+    state.sectionId = sectionsOfLevel(currentLevel())?.[0]?.id || null;
+  }
+  if (!state.lessonId || !currentLesson()) {
+    state.lessonId = lessonsOfSection(currentSection())?.[0]?.id || null;
+  }
+  if (!state.dayId || !currentDay()) {
+    state.dayId = daysOf(currentLesson())?.[0]?.id || null;
+  }
 }
 
 function currentTopic() {
   return state.topics.find((topic) => topic.id === state.topicId) || state.topics[0];
 }
 
+function arrayOf(value) {
+  return Array.isArray(value) ? value : [];
+}
+
 function levelsOf(topic) {
-  if (topic?.levels?.length) {
+  if (Array.isArray(topic?.levels) && topic.levels.length) {
     return topic.levels;
   }
   return [
@@ -400,7 +515,7 @@ function levelsOf(topic) {
       id: `${topic?.id || 'topic'}-default-level`,
       title: topic?.id === 'hsk' ? 'HSK3' : t('daily'),
       description: topic?.subtitle || '',
-      sections: topic?.sections || [],
+      sections: arrayOf(topic?.sections),
     },
   ];
 }
@@ -412,17 +527,65 @@ function currentLevel() {
 }
 
 function sectionsOf(topic) {
-  return levelsOf(topic).flatMap((level) => level.sections || []);
+  return levelsOf(topic).flatMap((level) => arrayOf(level.sections));
+}
+
+function sectionsOfLevel(level) {
+  return arrayOf(level?.sections);
+}
+
+function lessonsOfSection(section) {
+  return arrayOf(section?.lessons);
 }
 
 function currentSection() {
   const level = currentLevel();
-  return level?.sections.find((section) => section.id === state.sectionId) || level?.sections[0];
+  const sections = sectionsOfLevel(level);
+  return sections.find((section) => section.id === state.sectionId) || sections[0];
 }
 
 function currentLesson() {
   const section = currentSection();
-  return section?.lessons.find((lesson) => lesson.id === state.lessonId) || section?.lessons[0];
+  const lessons = lessonsOfSection(section);
+  return lessons.find((lesson) => lesson.id === state.lessonId) || lessons[0];
+}
+
+function daysOf(lesson) {
+  if (!lesson) {
+    return [];
+  }
+  if (Array.isArray(lesson?.days) && lesson.days.length) {
+    return lesson.days.map((day) => ({ ...day, tracks: arrayOf(day.tracks) }));
+  }
+  return [
+    {
+      id: `${lesson?.id || 'lesson'}-day-1`,
+      title: state.locale === 'zh' ? '第 1 天' : 'Ngày 1',
+      description: lesson?.description || '',
+      tracks: arrayOf(lesson?.tracks),
+    },
+  ];
+}
+
+function currentDay() {
+  const days = daysOf(currentLesson());
+  return days.find((day) => day.id === state.dayId) || days[0];
+}
+
+function tracksOfDay(day) {
+  return arrayOf(day?.tracks);
+}
+
+function questionTypeOf(track) {
+  return track?.questionType === 'image' ? 'image' : 'trueFalse';
+}
+
+function tracksOf(lesson) {
+  return daysOf(lesson).flatMap((day) => tracksOfDay(day));
+}
+
+function currentTracks() {
+  return tracksOfDay(currentDay());
 }
 
 function icon(name, size = 19) {
@@ -472,6 +635,9 @@ function handleNav(id) {
   if (id === 'file') {
     state.screen = state.answers.length ? 'report' : 'home';
   }
+  if (id === 'profile') {
+    state.screen = 'profile';
+  }
   render();
 }
 
@@ -479,6 +645,19 @@ function go(screen, payload = {}) {
   stopAudio();
   Object.assign(state, payload);
   state.screen = screen;
+  if (screen === 'login' || screen === 'register') {
+    state.authError = '';
+    state.authLoading = false;
+  }
+  if (screen === 'levels') {
+    state.sectionId = null;
+    state.lessonId = null;
+    state.dayId = null;
+  }
+  if (screen === 'sections') {
+    state.lessonId = null;
+    state.dayId = null;
+  }
   if (screen === 'practice') {
     state.index = 0;
     state.answers = [];
@@ -495,9 +674,11 @@ function back() {
     topics: 'home',
     levels: 'topics',
     sections: 'levels',
-    lessons: 'sections',
-    practice: 'lessons',
+    days: 'sections',
+    practice: 'days',
     report: 'home',
+    login: 'profile',
+    register: 'login',
   };
   state.screen = flow[state.screen] || 'home';
   render();
@@ -509,9 +690,12 @@ function render() {
     topics: renderTopics,
     levels: renderLevels,
     sections: renderSections,
-    lessons: renderLessons,
+    days: renderDays,
     practice: renderPractice,
     report: renderReport,
+    profile: renderProfile,
+    login: renderLogin,
+    register: renderRegister,
   };
   screens[state.screen]();
 }
@@ -536,7 +720,7 @@ function renderHome() {
     </section>
 
     <div class="home-course-list">
-      <button class="course-card featured" onclick="go('levels', { topicId: '${hskTopic.id}', levelId: '${levelsOf(hskTopic)[0]?.id || ''}', sectionId: '${levelsOf(hskTopic)[0]?.sections[0]?.id || ''}' })">
+      <button class="course-card featured" onclick="go('levels', { topicId: '${hskTopic.id}', levelId: '${levelsOf(hskTopic)[0]?.id || ''}' })">
         <span class="course-icon">${icon('headphones', 32)}</span>
         <span class="course-copy">
           <strong>${textOf(hskTopic, 'title')}</strong>
@@ -569,12 +753,287 @@ function renderHome() {
   `);
 }
 
+function renderProfile() {
+  const settingItems = [
+    ['sync', t('syncExtension')],
+    ['translate', t('nativeLanguage')],
+    ['graduation', t('levelSetting')],
+    ['goal', t('goalSetting')],
+    ['grid', t('topicSetting')],
+  ];
+
+  mount(`
+    <section class="profile-screen">
+      <div class="profile-spacer" aria-hidden="true"></div>
+
+      ${
+        state.user
+          ? `<section class="login-card user-card">
+              <span class="avatar-placeholder signed-in"><span>${initialsOf(state.user.name)}</span></span>
+              <span>
+                <small>${t('welcomeBack')}</small>
+                <strong>${escapeHtml(state.user.name)}</strong>
+                <em>${escapeHtml(state.user.email)}</em>
+              </span>
+              <button class="logout-btn" type="button" onclick="logout()">${t('logout')}</button>
+            </section>`
+          : `<button class="login-card" type="button" onclick="go('login')">
+              <span class="avatar-placeholder"><span></span></span>
+              <strong>${t('login')}</strong>
+              <span class="login-arrow">${icon('next', 30)}</span>
+            </button>`
+      }
+
+      <section class="pro-card">
+        <div class="pro-crown pro-crown-left" aria-hidden="true">${icon('crown', 74)}</div>
+        <div class="pro-crown pro-crown-right" aria-hidden="true">${icon('crown', 64)}</div>
+        <button class="pro-button" type="button">${icon('crown', 30)} <span>${t('upgradePro')}</span></button>
+        <p>${t('proHint')}</p>
+      </section>
+
+      <h2 class="profile-section-title">${t('settings')}</h2>
+      <section class="settings-card">
+        ${settingItems.map(([itemIcon, label]) => settingRow(itemIcon, label)).join('')}
+      </section>
+    </section>
+    ${nav('profile')}
+  `);
+}
+
+function renderLogin() {
+  mount(`
+    <section class="login-screen">
+      <button class="icon-btn login-back" type="button" onclick="back()" aria-label="${t('back')}">${icon('back', 20)}</button>
+
+      <section class="auth-card">
+        <div class="auth-copy">
+          <h1>${t('login')}</h1>
+          <p>${t('loginSubtitle')}</p>
+        </div>
+
+        <label class="auth-field">
+          ${icon('mail', 28)}
+          <input id="login-email" type="email" placeholder="${t('email')}" autocomplete="email" />
+        </label>
+
+        <label class="auth-field">
+          ${icon('lock', 28)}
+          <input id="login-password" type="password" placeholder="${t('password')}" autocomplete="current-password" />
+          <button class="password-toggle" type="button" onclick="togglePasswordVisibility()" aria-label="${t('password')}">${icon('eye', 28)}</button>
+        </label>
+
+        ${authMessage()}
+        <button class="forgot-link" type="button">${t('forgotPassword')}</button>
+        <button class="auth-submit" type="button" onclick="submitLogin()" ${state.authLoading ? 'disabled' : ''}>${state.authLoading ? t('loggingIn') : t('login')}</button>
+
+        <div class="auth-divider">
+          <span></span>
+          <strong>${t('or')}</strong>
+          <span></span>
+        </div>
+
+        <div class="social-row">
+          <button class="social-btn google" type="button" aria-label="Google"><span>G</span></button>
+          <button class="social-btn facebook" type="button" aria-label="Facebook"><span>f</span></button>
+          <button class="social-btn apple" type="button" aria-label="Apple"><span></span></button>
+        </div>
+
+        <p class="signup-copy">${t('noAccount')} <button type="button" onclick="go('register')">${t('signup')}</button></p>
+      </section>
+    </section>
+  `);
+}
+
+function renderRegister() {
+  mount(`
+    <section class="login-screen register-screen">
+      <button class="icon-btn login-back" type="button" onclick="back()" aria-label="${t('back')}">${icon('back', 20)}</button>
+
+      <section class="auth-card register-card">
+        <div class="auth-leaf" aria-hidden="true"></div>
+        <div class="auth-copy">
+          <h1>${t('signup')}</h1>
+          <p>${t('registerSubtitle')}</p>
+        </div>
+
+        <label class="auth-field">
+          ${icon('user', 28)}
+          <input id="register-name" type="text" placeholder="${t('fullName')}" autocomplete="name" />
+        </label>
+
+        <label class="auth-field">
+          ${icon('mail', 28)}
+          <input id="register-email" type="email" placeholder="${t('email')}" autocomplete="email" />
+        </label>
+
+        <label class="auth-field">
+          ${icon('lock', 28)}
+          <input id="register-password" type="password" placeholder="${t('password')}" autocomplete="new-password" />
+          <button class="password-toggle" type="button" onclick="togglePasswordVisibility('register-password')" aria-label="${t('password')}">${icon('eye', 28)}</button>
+        </label>
+
+        ${authMessage()}
+        <button class="auth-submit" type="button" onclick="submitRegister()" ${state.authLoading ? 'disabled' : ''}>${state.authLoading ? t('registering') : t('signup')}</button>
+
+        <div class="auth-divider">
+          <span></span>
+          <strong>${t('or')}</strong>
+          <span></span>
+        </div>
+
+        <div class="social-row">
+          <button class="social-btn google" type="button" aria-label="Google"><span>G</span></button>
+          <button class="social-btn facebook" type="button" aria-label="Facebook"><span>f</span></button>
+          <button class="social-btn apple" type="button" aria-label="Apple"><span></span></button>
+        </div>
+
+        <p class="signup-copy">${t('alreadyHaveAccount')} <button type="button" onclick="go('login')">${t('login')}</button></p>
+      </section>
+
+      <p class="terms-copy">${t('agreeTerms')} <button type="button">${t('termsOfService')}</button> ${state.locale === 'zh' ? '和' : 'và'} <button type="button">${t('privacyPolicy')}</button></p>
+    </section>
+  `);
+}
+
+function settingRow(itemIcon, label) {
+  return `
+    <button class="setting-row" type="button">
+      <span class="setting-icon">${icon(itemIcon, 24)}</span>
+      <span>${label}</span>
+      <span class="setting-chevron">${icon('next', 26)}</span>
+    </button>
+  `;
+}
+
+function authMessage() {
+  return state.authError ? `<p class="auth-message">${escapeHtml(state.authError)}</p>` : '';
+}
+
+function setAuth(result) {
+  state.authToken = result.token;
+  state.user = result.user;
+  localStorage.setItem('authToken', result.token);
+  state.authError = '';
+}
+
+async function authRequest(path, body) {
+  const response = await fetch(`/api/auth/${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.message || t('authRequired'));
+  }
+  return data;
+}
+
+async function loadCurrentUser() {
+  if (!state.authToken) {
+    return;
+  }
+  try {
+    const response = await fetch('/api/auth/me', {
+      headers: { Authorization: `Bearer ${state.authToken}` },
+    });
+    if (!response.ok) {
+      throw new Error('Invalid session');
+    }
+    state.user = await response.json();
+  } catch {
+    state.authToken = '';
+    state.user = null;
+    localStorage.removeItem('authToken');
+  }
+}
+
+async function submitLogin() {
+  const email = document.querySelector('#login-email')?.value || '';
+  const password = document.querySelector('#login-password')?.value || '';
+  if (!email || !password) {
+    state.authError = t('authRequired');
+    renderLogin();
+    return;
+  }
+  state.authLoading = true;
+  state.authError = '';
+  renderLogin();
+  try {
+    setAuth(await authRequest('login', { email, password }));
+    state.screen = 'profile';
+    state.authLoading = false;
+    renderProfile();
+  } catch (error) {
+    state.authError = error.message;
+    state.authLoading = false;
+    renderLogin();
+  }
+}
+
+async function submitRegister() {
+  const name = document.querySelector('#register-name')?.value || '';
+  const email = document.querySelector('#register-email')?.value || '';
+  const password = document.querySelector('#register-password')?.value || '';
+  if (!name || !email || !password) {
+    state.authError = t('authRequired');
+    renderRegister();
+    return;
+  }
+  state.authLoading = true;
+  state.authError = '';
+  renderRegister();
+  try {
+    setAuth(await authRequest('register', { name, email, password }));
+    state.screen = 'profile';
+    state.authLoading = false;
+    renderProfile();
+  } catch (error) {
+    state.authError = error.message;
+    state.authLoading = false;
+    renderRegister();
+  }
+}
+
+async function logout() {
+  const token = state.authToken;
+  state.authToken = '';
+  state.user = null;
+  localStorage.removeItem('authToken');
+  if (token) {
+    await fetch('/api/auth/logout', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+    }).catch(() => {});
+  }
+  renderProfile();
+}
+
+function initialsOf(name) {
+  return String(name || '?')
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() || '')
+    .join('');
+}
+
+function escapeHtml(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
 function quickStart() {
   const topic = state.topics[0];
   const level = levelsOf(topic)[0];
-  const section = level.sections[0];
-  const lesson = section.lessons[0];
-  go('practice', { topicId: topic.id, levelId: level.id, sectionId: section.id, lessonId: lesson.id });
+  const section = sectionsOfLevel(level)[0];
+  const lesson = lessonsOfSection(section)[0];
+  const day = daysOf(lesson)[0];
+  go('practice', { topicId: topic.id, levelId: level.id, sectionId: section.id, lessonId: lesson.id, dayId: day.id });
 }
 
 function renderTopics() {
@@ -584,7 +1043,7 @@ function renderTopics() {
       ${state.topics
         .map(
           (topic) => `
-            <button class="item-card" onclick="go('levels', { topicId: '${topic.id}', levelId: '${levelsOf(topic)[0]?.id || ''}', sectionId: '${levelsOf(topic)[0]?.sections[0]?.id || ''}' })">
+            <button class="item-card" onclick="go('levels', { topicId: '${topic.id}', levelId: '${levelsOf(topic)[0]?.id || ''}' })">
               <span class="round-icon">${icon(topic.icon)}</span>
               <span>
                 <h3>${textOf(topic, 'title')}</h3>
@@ -605,16 +1064,16 @@ function renderLevels() {
   const levels = levelsOf(topic);
   mount(`
     ${header(textOf(topic, 'title'), textOf(topic, 'subtitle'))}
-    <p class="section-title">${state.locale === 'zh' ? '选择等级' : 'Chọn cấp độ'}</p>
+    <p class="section-title">${t('chooseLevel')}</p>
     <div class="list">
       ${levels
         .map(
           (level) => `
-            <button class="item-card" onclick="go('sections', { levelId: '${level.id}', sectionId: '${level.sections[0]?.id || ''}' })">
+            <button class="item-card" onclick="go('sections', { levelId: '${level.id}', sectionId: '${sectionsOfLevel(level)[0]?.id || ''}' })">
               <span class="round-icon">${icon('target')}</span>
               <span>
                 <h3>${level.title}</h3>
-                <span class="subtle">${level.description || `${level.sections.length} ${state.locale === 'zh' ? '条路线' : 'lộ trình'}`}</span>
+                <span class="subtle">${level.description || `${sectionsOfLevel(level).length} ${state.locale === 'zh' ? '条路线' : 'lộ trình'}`}</span>
               </span>
               <span class="chevron">${icon('next', 18)}</span>
             </button>
@@ -628,22 +1087,26 @@ function renderLevels() {
 
 function renderSections() {
   const level = currentLevel();
+  const sections = sectionsOfLevel(level);
   mount(`
     ${header(level.title, level.description || textOf(currentTopic(), 'title'))}
     <p class="section-title">${t('chooseSection')}</p>
     <div class="list">
-      ${level.sections
+      ${sections
         .map(
-          (section) => `
-            <button class="item-card" onclick="go('lessons', { sectionId: '${section.id}', lessonId: '${section.lessons[0].id}' })">
+          (section) => {
+            const lesson = lessonsOfSection(section)[0];
+            return `
+            <button class="item-card" onclick="go('days', { sectionId: '${section.id}', lessonId: '${lesson?.id || ''}', dayId: '${daysOf(lesson)[0]?.id || ''}' })">
               <span class="round-icon">${icon(section.icon)}</span>
               <span>
                 <h3>${textOf(section, 'title')}</h3>
-                <span class="subtle">${textOf(section, 'description')}</span>
+                <span class="subtle">${daysOf(lesson).length} ${state.locale === 'zh' ? '天' : 'ngày'} · ${tracksOf(lesson).length} ${state.locale === 'zh' ? '题' : 'câu hỏi'}</span>
               </span>
               <span class="chevron">${icon('next', 18)}</span>
             </button>
-          `,
+          `;
+          },
         )
         .join('')}
     </div>
@@ -651,39 +1114,51 @@ function renderSections() {
   `);
 }
 
-function renderLessons() {
-  const section = currentSection();
+function renderDays() {
+  const lesson = currentLesson();
+  const days = daysOf(lesson);
   mount(`
-    ${header(textOf(section, 'title'), textOf(section, 'description'))}
+    ${header(textOf(currentSection(), 'title'), textOf(currentSection(), 'description'))}
+    <p class="section-title">${t('chooseDay')}</p>
     <div class="list">
-      ${section.lessons
-        .map(
-          (lesson) => `
-            <button class="item-card" onclick="go('practice', { lessonId: '${lesson.id}' })">
-              <span class="round-icon">${icon(section.icon)}</span>
+      ${days
+        .map((day, index) => {
+          const tracks = tracksOfDay(day);
+          return `
+            <button class="item-card" onclick="go('practice', { dayId: '${day.id}' })">
+              <span class="round-icon">${icon('calendar')}</span>
               <span>
-                <h3>${textOf(lesson, 'title')}</h3>
-                <span class="subtle">${textOf(lesson, 'description')}</span>
+                <h3>${day.title || `${t('chooseDay')} ${index + 1}`}</h3>
+                <span class="subtle">${day.description || `${tracks.length} ${state.locale === 'zh' ? '题' : 'câu hỏi'}`}</span>
               </span>
               <span class="chevron">${icon('next', 18)}</span>
             </button>
-          `,
-        )
+          `;
+        })
         .join('')}
     </div>
-    <button class="primary-btn" style="margin-top:18px" onclick="go('practice', { lessonId: '${section.lessons[0].id}' })">${t('startTopic')}</button>
     ${nav('calendar')}
   `);
 }
 
 function renderPractice() {
   const lesson = currentLesson();
-  const track = lesson.tracks[state.index];
+  const day = currentDay();
+  const tracks = currentTracks();
+  const track = tracks[state.index];
+  if (!track) {
+    mount(`
+      ${header(t('noQuestions'), textOf(lesson, 'title'))}
+      <button class="primary-btn" onclick="back()">${t('back')}</button>
+      ${nav('calendar')}
+    `);
+    return;
+  }
   ensureAudioTrack(track);
   const progress = state.index + 1;
 
   mount(`
-    ${header(`${lesson.level} | ${state.locale === 'zh' ? '第' : 'Bài'} ${progress} | ${modeOf(track)}`, textOf(lesson, 'goal'))}
+    ${header(`${lesson.level} | ${day.title || ''} | ${progress}/${tracks.length}`, questionTypeOf(track) === 'image' ? t('imageQuestion') : t('trueFalseQuestion'))}
     <div class="mode-steps">
       ${[t('listen'), t('chooseMeaning'), t('splitWords'), t('pinyin')]
         .map((step, index) => `<div class="mode-step ${index === Math.min(3, state.index % 4) ? 'active' : ''}">${index + 1} ${step}</div>`)
@@ -707,11 +1182,20 @@ function renderPractice() {
     </section>
 
     <p class="question-title">${trackText(track, 'prompt')}</p>
-    <div class="list">
-      ${trackOptions(track)
-        .map((option, index) => optionButton(option, index, track.answerIndex))
-        .join('')}
-    </div>
+    ${
+      isImageQuestion(track)
+        ? `<div class="image-option-grid">
+            ${trackOptions(track)
+              .slice(0, 4)
+              .map((option, index) => imageOptionButton(option, optionImagesOf(track)[index], index, track.answerIndex))
+              .join('')}
+          </div>`
+        : `<div class="list">
+            ${trackOptions(track)
+              .map((option, index) => optionButton(option, index, track.answerIndex))
+              .join('')}
+          </div>`
+    }
 
     <div class="analysis">
       <div class="analysis-chip"><strong>${t('keyword')}</strong>${track.keyword}</div>
@@ -721,9 +1205,27 @@ function renderPractice() {
     </div>
 
     <button class="primary-btn" style="margin-top:18px;${state.selected === null ? 'opacity:.52' : ''}" onclick="continuePractice()" ${state.selected === null ? 'disabled' : ''}>
-      ${state.checked && progress === 10 ? t('viewReport') : state.checked ? t('nextQuestion') : t('check')}
+      ${state.checked && progress === tracks.length ? t('viewReport') : state.checked ? t('nextQuestion') : t('check')}
     </button>
   `);
+}
+
+function imageOptionButton(option, imageUrl, index, answerIndex) {
+  const isSelected = state.selected === index;
+  const isCorrect = state.checked && index === answerIndex;
+  const isWrong = state.checked && isSelected && index !== answerIndex;
+  const mark = isCorrect ? icon('check', 18) : isWrong ? icon('x', 18) : '';
+
+  return `
+    <button class="image-option-card ${isSelected ? 'selected' : ''} ${isCorrect ? 'correct' : ''} ${isWrong ? 'wrong' : ''}" onclick="selectAnswer(${index})">
+      <span class="image-option-label">${String.fromCharCode(65 + index)}</span>
+      <span class="image-option-media">
+        ${imageUrl ? `<img src="${imageUrl}" alt="${option}" />` : `<span>${option}</span>`}
+      </span>
+      <span class="image-option-caption">${option}</span>
+      <span class="image-option-mark">${mark}</span>
+    </button>
+  `;
 }
 
 function optionButton(option, index, answerIndex) {
@@ -750,8 +1252,8 @@ function selectAnswer(index) {
 }
 
 function continuePractice() {
-  const lesson = currentLesson();
-  const track = lesson.tracks[state.index];
+  const tracks = currentTracks();
+  const track = tracks[state.index];
 
   if (state.selected === null) {
     return;
@@ -769,7 +1271,7 @@ function continuePractice() {
     return;
   }
 
-  if (state.index >= lesson.tracks.length - 1) {
+  if (state.index >= tracks.length - 1) {
     stopAudio();
     state.screen = 'report';
     renderReport();
@@ -819,8 +1321,7 @@ function toggleAudio() {
 }
 
 function playCurrentAudio() {
-  const lesson = currentLesson();
-  const track = lesson.tracks[state.index];
+  const track = currentTracks()[state.index];
   ensureAudioTrack(track);
 
   if (!track.audioUrl) {
@@ -950,7 +1451,7 @@ function renderReport() {
       <div class="suggest-card">
         <h3>${t('upgradeTopic')}</h3>
         <p class="subtle">${textOf(currentSection(), 'title')}<br />${t('nextLesson')}</p>
-        <button class="pill-btn" onclick="go('lessons')">${t('explore')}</button>
+        <button class="pill-btn" onclick="go('days')">${t('explore')}</button>
       </div>
     </div>
     ${nav('file')}
@@ -1022,7 +1523,7 @@ function resultAction(kind, title, subtitle, action) {
 
 function renderReport() {
   const lesson = currentLesson();
-  const total = lesson.tracks.length || 10;
+  const total = currentTracks().length || 10;
   const answered = state.answers.length || total;
   const correct = state.answers.filter((answer) => answer.correct).length;
   const score = Math.round((correct / Math.max(1, answered)) * 100) || 0;
@@ -1065,12 +1566,20 @@ function renderReport() {
     <div class="result-actions">
       ${resultAction('continue', t('continuePath'), textOf(lesson, 'goal'), "go('practice')")}
       ${resultAction('review', t('weakPart'), weakMode, 'retryWrong()')}
-      ${resultAction('next', nextLessonTitle, textOf(currentSection(), 'title'), "go('lessons')")}
+      ${resultAction('next', nextLessonTitle, textOf(currentSection(), 'title'), "go('days')")}
     </div>
 
-    <button class="primary-btn result-cta" onclick="go('practice')">${continueLearning}</button>
+    <button class="primary-btn result-cta" onclick="go('days')">${continueLearning}</button>
     ${nav('file')}
   `);
+}
+
+function togglePasswordVisibility(inputId = 'login-password') {
+  const input = document.querySelector(`#${inputId}`);
+  if (!input) {
+    return;
+  }
+  input.type = input.type === 'password' ? 'text' : 'password';
 }
 
 window.go = go;
@@ -1082,6 +1591,28 @@ window.toggleAudio = toggleAudio;
 window.handleNav = handleNav;
 window.retryWrong = retryWrong;
 window.toggleLanguage = toggleLanguage;
+window.togglePasswordVisibility = togglePasswordVisibility;
+window.submitLogin = submitLogin;
+window.submitRegister = submitRegister;
+window.logout = logout;
+
+async function refreshVisibleData() {
+  if (state.screen === 'practice' || state.screen === 'report') {
+    return;
+  }
+  await loadTopics();
+  render();
+}
+
+window.addEventListener('focus', () => {
+  refreshVisibleData().catch(() => {});
+});
+
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) {
+    refreshVisibleData().catch(() => {});
+  }
+});
 
 init().catch(() => {
   mount(`<div class="empty-state">${t('loadError')}</div>`);

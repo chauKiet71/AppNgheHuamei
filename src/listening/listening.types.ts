@@ -2,16 +2,27 @@ export interface ListeningTrack {
   id: string;
   title: string;
   subtitle: string;
+  questionType?: 'trueFalse' | 'image';
   mode: string;
   text: string;
   pinyin: string;
   vietnamese: string;
   prompt: string;
   options: string[];
+  optionImages?: string[];
   answerIndex: number;
   keyword: string;
+  imageUrl?: string;
+  imageAlt?: string;
   audioUrl?: string;
   audioFileName?: string;
+}
+
+export interface ListeningDay {
+  id: string;
+  title: string;
+  description: string;
+  tracks: ListeningTrack[];
 }
 
 export interface ListeningLesson {
@@ -20,7 +31,8 @@ export interface ListeningLesson {
   description: string;
   level: string;
   goal: string;
-  tracks: ListeningTrack[];
+  days?: ListeningDay[];
+  tracks?: ListeningTrack[];
 }
 
 export interface ListeningSection {

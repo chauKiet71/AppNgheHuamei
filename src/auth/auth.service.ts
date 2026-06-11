@@ -11,6 +11,7 @@ type UserRecord = {
   id: string;
   name: string;
   email: string;
+  avatarUrl?: string;
   passwordHash: string;
   sessionToken?: string | null;
   createdAt: string;
@@ -21,6 +22,7 @@ type PublicUser = {
   id: string;
   name: string;
   email: string;
+  avatarUrl?: string;
 };
 
 type AuthResult = {
@@ -32,6 +34,7 @@ type DbUserRow = {
   id: string;
   name: string;
   email: string;
+  avatar_url?: string | null;
   password_hash: string;
   session_token: string | null;
   created_at: string;
@@ -69,6 +72,7 @@ export class AuthService {
       id: this.id('user'),
       name,
       email,
+      avatarUrl: '',
       passwordHash: await this.hashPassword(password),
       sessionToken: this.token(),
       createdAt: now,
@@ -98,6 +102,60 @@ export class AuthService {
     if (!user) {
       throw new UnauthorizedException('Phiên đăng nhập không hợp lệ.');
     }
+    return this.publicUser(user);
+  }
+
+  async updateMe(token: string | undefined, input: { name?: string; email?: string; password?: string; avatarUrl?: string }): Promise<PublicUser> {
+    const user = await this.findByToken(this.cleanBearer(token));
+    if (!user) {
+      throw new UnauthorizedException('Phiên đăng nhập không hợp lệ.');
+    }
+
+    const name = String(input.name || '').trim();
+    const email = this.normalizeEmail(input.email);
+    const password = String(input.password || '');
+    const avatarUrl = String(input.avatarUrl || '').trim();
+
+    if (!name) {
+      throw new BadRequestException('Vui lòng nhập họ và tên.');
+    }
+    if (!this.isValidEmail(email)) {
+      throw new BadRequestException('Email không hợp lệ.');
+    }
+    if (password && password.length < 6) {
+      throw new BadRequestException('Mật khẩu mới phải có ít nhất 6 ký tự.');
+    }
+
+    const existing = await this.findByEmail(email);
+    if (existing && existing.id !== user.id) {
+      throw new BadRequestException('Email này đã được sử dụng.');
+    }
+
+    user.name = name;
+    user.email = email;
+    if (avatarUrl) {
+      user.avatarUrl = avatarUrl;
+    }
+    if (password) {
+      user.passwordHash = await this.hashPassword(password);
+    }
+    user.updatedAt = new Date().toISOString();
+
+    await this.updateUser(user);
+    return this.publicUser(user);
+  }
+
+  async updateAvatar(token: string | undefined, avatarUrl: string): Promise<PublicUser> {
+    const user = await this.findByToken(this.cleanBearer(token));
+    if (!user) {
+      throw new UnauthorizedException('Phiên đăng nhập không hợp lệ.');
+    }
+    if (!avatarUrl) {
+      throw new BadRequestException('Ảnh đại diện không hợp lệ.');
+    }
+    user.avatarUrl = avatarUrl;
+    user.updatedAt = new Date().toISOString();
+    await this.updateUser(user);
     return this.publicUser(user);
   }
 
@@ -149,9 +207,9 @@ export class AuthService {
   private async insertUser(user: UserRecord): Promise<void> {
     if (this.database.enabled) {
       await this.database.query(
-        `insert into app_users (id, name, email, password_hash, session_token, created_at, updated_at)
-         values ($1, $2, $3, $4, $5, $6, $7)`,
-        [user.id, user.name, user.email, user.passwordHash, user.sessionToken, user.createdAt, user.updatedAt],
+        `insert into app_users (id, name, email, avatar_url, password_hash, session_token, created_at, updated_at)
+         values ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [user.id, user.name, user.email, user.avatarUrl || null, user.passwordHash, user.sessionToken, user.createdAt, user.updatedAt],
       );
       return;
     }
@@ -170,6 +228,25 @@ export class AuthService {
     if (user) {
       user.sessionToken = token;
       user.updatedAt = new Date().toISOString();
+      await this.writeLocalUsers(users);
+    }
+  }
+
+  private async updateUser(user: UserRecord): Promise<void> {
+    if (this.database.enabled) {
+      await this.database.query(
+        `update app_users
+         set name = $1, email = $2, avatar_url = $3, password_hash = $4, updated_at = now()
+         where id = $5`,
+        [user.name, user.email, user.avatarUrl || null, user.passwordHash, user.id],
+      );
+      return;
+    }
+
+    const users = await this.readLocalUsers();
+    const index = users.findIndex((item) => item.id === user.id);
+    if (index >= 0) {
+      users[index] = user;
       await this.writeLocalUsers(users);
     }
   }
@@ -203,10 +280,11 @@ export class AuthService {
   }
 
   private fromDb(row: DbUserRow): UserRecord {
-    return {
+      return {
       id: row.id,
       name: row.name,
       email: row.email,
+      avatarUrl: row.avatar_url || undefined,
       passwordHash: row.password_hash,
       sessionToken: row.session_token,
       createdAt: row.created_at,
@@ -215,7 +293,7 @@ export class AuthService {
   }
 
   private publicUser(user: UserRecord): PublicUser {
-    return { id: user.id, name: user.name, email: user.email };
+    return { id: user.id, name: user.name, email: user.email, avatarUrl: user.avatarUrl };
   }
 
   private normalizeEmail(email?: string): string {

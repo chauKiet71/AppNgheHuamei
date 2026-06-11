@@ -280,6 +280,37 @@ export class ListeningController {
     return this.listeningService.attachTrackAudio(topicId, sectionId, lessonId, trackId, audio);
   }
 
+  @Post('topics/:topicId/sections/:sectionId/lessons/:lessonId/questions/:trackId/audios/:audioIndex')
+  @UseInterceptors(
+    FileInterceptor('audio', {
+      storage: memoryStorage(),
+      fileFilter: (_request, file, callback) => {
+        const allowedExtensions = ['.mp3', '.mpeg', '.wav', '.m4a', '.webm', '.ogg', '.aac'];
+        const extension = extname(file.originalname).toLowerCase();
+        const isAudioMime = file.mimetype.startsWith('audio/');
+        const isAllowedExtension = allowedExtensions.includes(extension);
+        callback(null, isAudioMime || isAllowedExtension);
+      },
+      limits: {
+        fileSize: 50 * 1024 * 1024,
+      },
+    }),
+  )
+  async uploadTrackAudioAtIndex(
+    @Param('topicId') topicId: string,
+    @Param('sectionId') sectionId: string,
+    @Param('lessonId') lessonId: string,
+    @Param('trackId') trackId: string,
+    @Param('audioIndex') audioIndex: string,
+    @UploadedFile() file: MulterFile,
+  ): Promise<ListeningTrack> {
+    if (!file) {
+      throw new BadRequestException('Audio file is required. Supported formats: mp3, wav, m4a, webm, ogg, aac.');
+    }
+    const audio = await this.uploadAudioToCloudinary(file);
+    return this.listeningService.attachTrackAudioAtIndex(topicId, sectionId, lessonId, trackId, Number(audioIndex), audio);
+  }
+
   @Post('topics/:topicId/sections/:sectionId/lessons/:lessonId/questions/:trackId/option-images/:optionIndex')
   @UseInterceptors(
     FileInterceptor('image', {

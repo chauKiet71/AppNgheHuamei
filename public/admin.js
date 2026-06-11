@@ -12,6 +12,10 @@ const state = {
   toast: '',
   loadingAction: '',
   locale: 'vi',
+  showTopicMetricsList: false,
+  multiAudioActiveIndex: 0,
+  previewAudioElement: null,
+  previewAudioTrackKey: '',
 };
 
 const icons = {
@@ -281,7 +285,26 @@ function tracksOfLesson(item) {
 
 function optionImagesOf(item) {
   const images = arrayOf(item?.optionImages);
-  return Array.from({ length: 4 }, (_, index) => images[index] || '');
+  return Array.from({ length: optionCountOf(item) }, (_, index) => images[index] || '');
+}
+
+function optionCountOf(item) {
+  return item?.questionType === 'multiAudio' ? 5 : 4;
+}
+
+function isImageChoiceQuestion(item) {
+  return ['image', 'multiAudio'].includes(item?.questionType || '');
+}
+
+function audioItemsOf(item) {
+  const items = arrayOf(item?.audioItems)
+    .map((audio) => ({
+      url: audio?.url || '',
+      fileName: audio?.fileName || '',
+      answerIndex: Number.isFinite(Number(audio?.answerIndex)) ? Number(audio.answerIndex) : Number(item?.answerIndex || 0),
+    }))
+    .filter((audio) => audio.url);
+  return items.slice(0, 5);
 }
 
 function level() {
@@ -1074,7 +1097,7 @@ function questionForm(item) {
       ${input('q-text', t('chineseContent'), item.text)}
       ${input('q-pinyin', 'Pinyin', item.pinyin)}
       ${input('q-keyword', t('keyword'), item.keyword)}
-      ${input('q-answer', t('correctAnswer'), String(item.answerIndex + 1), 'number')}
+      ${questionType === 'multiAudio' ? `<input id="q-answer" type="hidden" value="${multiAudioAnswerIndex(item) + 1}" />` : input('q-answer', t('correctAnswer'), String(item.answerIndex + 1), 'number')}
       ${textarea('q-prompt', t('visiblePrompt'), item.prompt)}
       ${textarea('q-vietnamese', t('vietnameseMeaning'), item.vietnamese)}
       ${textarea('q-options', t('options'), item.options.join('\n'))}
@@ -1519,6 +1542,15 @@ function setQuestionType(questionType) {
 function setAnswerIndex(index) {
   const current = question();
   if (!current) return;
+  if (current.questionType === 'multiAudio') {
+    const activeIndex = Math.max(0, Math.min(4, Number(state.multiAudioActiveIndex) || 0));
+    const items = Array.from({ length: 5 }, (_, itemIndex) => audioItemsOf(current)[itemIndex] || { url: '', fileName: '', answerIndex: current.answerIndex || 0 });
+    items[activeIndex] = {
+      ...items[activeIndex],
+      answerIndex: index,
+    };
+    current.audioItems = items.filter((item) => item.url);
+  }
   current.answerIndex = index;
   const answerInput = document.getElementById('q-answer');
   if (answerInput) {
@@ -1702,6 +1734,8 @@ function questionCreatePicker(currentDay) {
 
 function optionImageFields(item, options) {
   const images = optionImagesOf(item);
+  const activeAudioIndex = Math.max(0, Math.min(4, Number(state.multiAudioActiveIndex) || 0));
+  const activeAnswerIndex = item.questionType === 'multiAudio' ? multiAudioAnswerIndex(item, activeAudioIndex) : item.answerIndex;
   return `
     <section class="option-image-admin" style="grid-column:1 / -1">
       <div class="section-title">${t('optionImages')}</div>
@@ -1880,6 +1914,761 @@ function render() {
   `);
 }
 
+function textOr(value, fallback = 'Chua co du lieu') {
+  return escapeHtml(value || fallback);
+}
+
+function toggleTopicMetricsList() {
+  state.showTopicMetricsList = !state.showTopicMetricsList;
+  render();
+}
+
+function selectTopicFromMetrics(id) {
+  state.showTopicMetricsList = false;
+  selectTopic(id);
+}
+
+function metricsTopicList() {
+  if (!state.showTopicMetricsList) return '';
+  return `
+    <section class="metric-topic-panel">
+      <div class="metric-topic-head">
+        <div>
+          <strong>Danh sach chu de</strong>
+          <p class="muted">${state.topics.length} chu de dang co trong he thong</p>
+        </div>
+        <button type="button" class="icon-btn" onclick="toggleTopicMetricsList()" title="Dong danh sach">${icon('x', 16)}</button>
+      </div>
+      <div class="metric-topic-list">
+        ${
+          state.topics
+            .map((item) => {
+              const levels = levelsOf(item);
+              const routes = levels.flatMap((currentLevel) => sectionsOf(currentLevel));
+              return `
+                <button type="button" class="metric-topic-item ${item.id === state.topicId ? 'active' : ''}" onclick="selectTopicFromMetrics('${item.id}')">
+                  <span class="metric-topic-icon">${icon(item.icon || 'book', 17)}</span>
+                  <span>
+                    <strong>${escapeHtml(item.title || 'Chu de')}</strong>
+                    <span class="muted">${levels.length} cap do · ${routes.length} lo trinh</span>
+                  </span>
+                  ${icon('chevron-right', 16)}
+                </button>
+              `;
+            })
+            .join('') || '<div class="empty">Chua co chu de</div>'
+        }
+      </div>
+    </section>
+  `;
+}
+
+function metrics() {
+  const topics = state.topics.length;
+  const levels = state.topics.flatMap((item) => levelsOf(item));
+  const sectionItems = levels.flatMap((item) => sectionsOf(item));
+  const lessonItems = sectionItems.flatMap((item) => lessonsOf(item));
+  const sections = sectionItems.length;
+  const days = lessonItems.flatMap((item) => daysOf(item)).length;
+
+  return `
+    <div class="metric-zone">
+      <div class="metric-grid">
+        <button type="button" class="metric metric-button ${state.showTopicMetricsList ? 'active' : ''}" onclick="toggleTopicMetricsList()" aria-expanded="${state.showTopicMetricsList ? 'true' : 'false'}">
+          <span class="metric-icon">${icon('folders', 18)}</span>
+          <span><span>Chu de</span><strong>${topics}</strong></span>
+          <span class="metric-cue">${icon(state.showTopicMetricsList ? 'chevron-up' : 'chevron-down', 16)}</span>
+        </button>
+        <div class="metric"><span class="metric-icon">${icon('badge-check', 18)}</span><span><span>Cap do</span><strong>${levels.length}</strong></span></div>
+        <div class="metric"><span class="metric-icon">${icon('route', 18)}</span><span><span>Lo trinh</span><strong>${sections}</strong></span></div>
+        <div class="metric"><span class="metric-icon">${icon('calendar-days', 18)}</span><span><span>Ngay</span><strong>${days}</strong></span></div>
+      </div>
+      ${metricsTopicList()}
+    </div>
+  `;
+}
+
+function sidebarNav() {
+  const items = [
+    ['layout-dashboard', 'Tong quan'],
+    ['folders', 'Chu de'],
+    ['badge-check', 'Cap do'],
+    ['route', 'Lo trinh'],
+    ['calendar-days', 'Ngay hoc'],
+    ['list-checks', 'Bo cau hoi'],
+    ['file-question', 'Cau hoi'],
+    ['users', 'Nguoi dung'],
+    ['bar-chart-3', 'Bao cao'],
+    ['settings', 'Cai dat'],
+  ];
+  return `
+    <nav class="sidebar-nav">
+      ${items
+        .map(
+          ([iconName, label], index) => `
+            <a class="nav-item ${index === 1 ? 'active' : ''}" href="#">
+              ${icon(iconName, 17)}
+              <span>${label}</span>
+            </a>
+          `,
+        )
+        .join('')}
+    </nav>
+  `;
+}
+
+function breadcrumb(currentTopic, currentLevel, currentSection, currentLesson, currentDay) {
+  const parts = [
+    currentTopic?.title || 'Chu de',
+    currentLevel?.title || 'Cap do',
+    currentSection?.title || 'Lo trinh',
+    currentLesson?.title || 'Bo cau hoi',
+    currentDay?.title || 'Ngay',
+    'Tao cau hoi',
+  ];
+  return `
+    <div class="breadcrumb">
+      ${parts
+        .map((part, index) => {
+          const current = index === parts.length - 1;
+          return `${index ? icon('chevron-right', 14) : ''}<span>${current ? `<strong>${textOr(part, '')}</strong>` : textOr(part, '')}</span>`;
+        })
+        .join('')}
+    </div>
+  `;
+}
+
+function flowPanel(currentTopic, currentLevel, currentSection, currentLesson, currentDay) {
+  return `
+    <section class="panel">
+      <div class="panel-head">
+        <h3>1. Thong tin cau hoi</h3>
+        <div class="actions">
+          <button class="btn ${isLoading('create-topic') ? 'loading' : ''}" onclick="createTopic()" ${loadingAttrs('create-topic')}>${loadingIcon('create-topic', 'plus')} Chu de</button>
+          <button class="btn primary ${isLoading('save-topic') ? 'loading' : ''}" onclick="saveTopic()" ${loadingAttrs('save-topic')} ${currentTopic ? '' : 'disabled'}>${loadingIcon('save-topic', 'save')} Luu chu de</button>
+          <button class="btn danger ${isLoading('delete-topic') ? 'loading' : ''}" onclick="deleteTopic()" ${loadingAttrs('delete-topic')} ${currentTopic ? '' : 'disabled'}>${loadingIcon('delete-topic', 'trash')} Xoa chu de</button>
+          <button class="btn ${isLoading('create-level') ? 'loading' : ''}" onclick="createLevel()" ${loadingAttrs('create-level')} ${currentTopic ? '' : 'disabled'}>${loadingIcon('create-level', 'plus')} Cap do</button>
+          <button class="btn ${isLoading('create-section') ? 'loading' : ''}" onclick="createSection()" ${loadingAttrs('create-section')} ${currentLevel ? '' : 'disabled'}>${loadingIcon('create-section', 'plus')} Lo trinh</button>
+          <button class="btn ${isLoading('create-lesson') ? 'loading' : ''}" onclick="createLesson()" ${loadingAttrs('create-lesson')} ${currentSection ? '' : 'disabled'}>${loadingIcon('create-lesson', 'plus')} Bo de</button>
+          <button class="btn ${isLoading('create-day') ? 'loading' : ''}" onclick="createDay()" ${loadingAttrs('create-day')} ${currentLesson ? '' : 'disabled'}>${loadingIcon('create-day', 'plus')} Ngay</button>
+        </div>
+      </div>
+      <div class="panel-body">
+        ${topicForm(currentTopic)}
+        <div class="flow-grid">
+          <div class="flow-block">
+            <p class="section-title">Cap do</p>
+            <div class="stack">${levelsOf(currentTopic).map(levelButton).join('') || '<div class="empty">Chua co cap do</div>'}</div>
+            ${levelForm(currentLevel)}
+          </div>
+          <div class="flow-block">
+            <p class="section-title">Lo trinh</p>
+            <div class="stack">${sectionsOf(currentLevel).map(sectionButton).join('') || '<div class="empty">Chua co lo trinh</div>'}</div>
+            ${sectionForm(currentSection)}
+          </div>
+          <div class="flow-block">
+            <p class="section-title">Bo cau hoi</p>
+            <div class="stack">${lessonsOf(currentSection).map(lessonButton).join('') || '<div class="empty">Chua co bo cau hoi</div>'}</div>
+            ${lessonForm(currentLesson)}
+            <div class="form-actions" style="margin-top:12px">
+              <button type="button" class="btn primary ${isLoading('save-lesson') ? 'loading' : ''}" onclick="saveLesson()" ${loadingAttrs('save-lesson')} ${currentLesson ? '' : 'disabled'}>${loadingIcon('save-lesson', 'save')} Luu bo de</button>
+              <button type="button" class="btn danger ${isLoading('delete-lesson') ? 'loading' : ''}" onclick="deleteLesson()" ${loadingAttrs('delete-lesson')} ${currentLesson ? '' : 'disabled'}>${loadingIcon('delete-lesson', 'trash')}</button>
+            </div>
+          </div>
+          <div class="flow-block">
+            <p class="section-title">Ngay hoc</p>
+            ${dayForm(currentDay)}
+            <div class="stack" style="margin-top:12px">${daysOf(currentLesson).map(dayButton).join('') || '<div class="empty">Chua co ngay</div>'}</div>
+          </div>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
+function questionPanel(currentDay) {
+  return `
+    <section class="panel">
+      <div class="panel-head">
+        <h3>2. Danh sach audio va cau hoi</h3>
+        ${questionCreatePicker(currentDay)}
+      </div>
+      <div class="panel-body">
+        <div class="question-editor">
+          <div class="question-list stack">
+            ${tracksOfDay(currentDay).map(questionButton).join('') || `<div class="empty">${t('emptyQuestions')}</div>`}
+          </div>
+          ${questionForm(question())}
+        </div>
+      </div>
+    </section>
+  `;
+}
+
+function previewChoiceCard(item, index, options, images) {
+  const label = options[index] || `Dap an ${String.fromCharCode(65 + index)}`;
+  const image = images[index];
+  const isCorrect = item?.answerIndex === index;
+  return `
+    <div class="choice-card ${isCorrect ? 'correct' : ''}">
+      <span class="choice-letter">${String.fromCharCode(65 + index)}</span>
+      ${image ? `<img src="${escapeAttr(image)}" alt="${escapeAttr(label)}" />` : `<div class="choice-label">${escapeHtml(label)}</div>`}
+      ${isCorrect ? `<span class="choice-check">${icon('check', 14)}</span>` : ''}
+    </div>
+  `;
+}
+
+function studentPreview(item) {
+  if (!item) {
+    return `
+      <section class="preview-card">
+        <h3>Xem truoc giao dien hoc vien</h3>
+        <div class="empty">Chon hoac tao cau hoi de xem preview.</div>
+      </section>
+    `;
+  }
+  const questionType = item.questionType || 'trueFalse';
+  const options = questionType === 'image' ? Array.from({ length: 4 }, (_, index) => arrayOf(item.options)[index] || `Dap an ${String.fromCharCode(65 + index)}`) : arrayOf(item.options);
+  const images = optionImagesOf(item);
+  const optionCount = questionType === 'image' ? 4 : Math.max(options.length, 2);
+  return `
+    <section class="preview-card">
+      <h3>Xem truoc giao dien hoc vien</h3>
+      <div class="student-frame">
+        <p>${escapeHtml(item.prompt || 'Nghe doan am thanh va chon dap an dung')}</p>
+        <div class="audio-preview">
+          <span class="audio-play">${icon('volume-2', 18)}</span>
+          <span class="wave"></span>
+          <span class="muted">00:00 / 00:34</span>
+        </div>
+        <div class="choice-grid">
+          ${Array.from({ length: optionCount }, (_, index) => previewChoiceCard(item, index, options, images)).join('')}
+        </div>
+        <div class="preview-note">${icon('info', 15)} Hoc vien se nghe ngau nhien mot audio trong danh sach cua ngay hoc.</div>
+      </div>
+    </section>
+  `;
+}
+
+function questionInfo(currentTopic, currentLevel, currentSection, currentLesson, currentDay, currentQuestion) {
+  return `
+    <section class="preview-card">
+      <h3>Thong tin cau hoi</h3>
+      <dl class="info-list">
+        <div><dt>Chu de</dt><dd>${textOr(currentTopic?.title, '-')}</dd></div>
+        <div><dt>Cap do</dt><dd>${textOr(currentLevel?.title, '-')}</dd></div>
+        <div><dt>Lo trinh</dt><dd>${textOr(currentSection?.title, '-')}</dd></div>
+        <div><dt>Bo cau hoi</dt><dd>${textOr(currentLesson?.title, '-')}</dd></div>
+        <div><dt>Ngay</dt><dd>${textOr(currentDay?.title, '-')}</dd></div>
+        <div><dt>Cau hoi</dt><dd>${textOr(currentQuestion?.title, '-')}</dd></div>
+      </dl>
+    </section>
+  `;
+}
+
+function render() {
+  const currentTopic = topic();
+  const currentLevel = level();
+  const currentSection = section();
+  const currentLesson = lesson();
+  const currentDay = day();
+  const currentQuestion = question();
+
+  mount(`
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">${icon('graduation-cap', 20)}</span>
+        <div class="brand-copy">
+          <h1>HSK3 Luyen nghe</h1>
+          <p>Admin content studio</p>
+        </div>
+      </div>
+      ${sidebarNav()}
+      <div class="sidebar-footer">
+        <div class="admin-user">
+          <span class="avatar">A</span>
+          <div>
+            <strong>Admin</strong>
+            <p class="muted">Quan tri vien</p>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <section class="main">
+      <div class="topbar">
+        ${breadcrumb(currentTopic, currentLevel, currentSection, currentLesson, currentDay)}
+        <div class="actions">
+          ${languageToggle()}
+          <a class="btn ghost" href="/" target="_blank">${icon('book')} Xem app</a>
+          <button class="btn ghost ${isLoading('refresh') ? 'loading' : ''}" onclick="refreshData()" ${loadingAttrs('refresh')}>${loadingIcon('refresh', 'refresh')} Tai lai</button>
+          <button class="btn primary ${isLoading('save-question') ? 'loading' : ''}" onclick="saveQuestion()" ${loadingAttrs('save-question')} ${currentQuestion ? '' : 'disabled'}>${loadingIcon('save-question', 'save')} Luu cau hoi</button>
+        </div>
+      </div>
+
+      <div class="page-title">
+        <h2>Tao cau hoi nghe chon hinh</h2>
+        <p class="muted">Nghe mot audio va chon mot dap an dung trong cac hinh anh.</p>
+      </div>
+
+      <div class="admin-content">
+        <div class="authoring-column">
+          ${metrics()}
+          ${flowPanel(currentTopic, currentLevel, currentSection, currentLesson, currentDay)}
+          ${questionPanel(currentDay)}
+        </div>
+        <aside class="preview-column">
+          ${questionInfo(currentTopic, currentLevel, currentSection, currentLesson, currentDay, currentQuestion)}
+          ${studentPreview(currentQuestion)}
+        </aside>
+      </div>
+    </section>
+    ${state.toast ? `<div class="toast">${state.toast}</div>` : ''}
+  `);
+}
+
+function imageChoiceOptions(item) {
+  return Array.from({ length: optionCountOf(item) }, (_, index) => arrayOf(item.options)[index] || `Đáp án ${String.fromCharCode(65 + index)}`);
+}
+
+async function createQuestion(questionType = state.createQuestionType || 'image') {
+  if (!lesson()) {
+    await ensureRouteLesson();
+  }
+  if (!day()) {
+    await createDay();
+  }
+  if (!lesson() || !day()) return;
+  return withLoading(`create-question-${questionType}`, async () => {
+    const isMultiAudio = questionType === 'multiAudio';
+    const isImageType = questionType === 'image' || isMultiAudio;
+    const optionCount = isMultiAudio ? 5 : 4;
+    const created = await mutate(
+      `/topics/${state.topicId}/sections/${state.sectionId}/lessons/${state.lessonId}/days/${state.dayId}/questions`,
+      'POST',
+      {
+        title: `${t('numberedQuestion')} ${tracksOfDay(day()).length + 1}`,
+        questionType,
+        mode: isMultiAudio ? 'Nhiều audio chọn hình' : questionType === 'image' ? 'Câu hỏi hình ảnh' : 'Câu hỏi đúng sai',
+        prompt: isImageType ? 'Nghe đoạn âm thanh và chọn hình ảnh đúng.' : 'Nghe và chọn đáp án đúng.',
+        options: isImageType ? Array.from({ length: optionCount }, (_, index) => `Đáp án ${String.fromCharCode(65 + index)}`) : ['Đúng', 'Sai'],
+        optionImages: Array.from({ length: optionCount }, () => ''),
+        audioItems: isMultiAudio ? [] : undefined,
+      },
+    );
+    state.questionId = created.id;
+    await loadTopics();
+  });
+}
+
+function setQuestionType(questionType) {
+  const current = question();
+  if (!current) return;
+  current.questionType = questionType;
+  if (questionType === 'trueFalse') {
+    current.options = ['Đúng', 'Sai'];
+    current.answerIndex = 0;
+  }
+  if (questionType === 'image' || questionType === 'multiAudio') {
+    const optionCount = questionType === 'multiAudio' ? 5 : 4;
+    current.options = Array.from({ length: optionCount }, (_, index) => arrayOf(current.options)[index] || `Đáp án ${String.fromCharCode(65 + index)}`);
+    current.optionImages = optionImagesOf(current);
+  }
+  if (questionType === 'multiAudio') {
+    current.audioItems = audioItemsOf(current);
+  }
+  render();
+}
+
+async function saveQuestion() {
+  if (!question()) return;
+  const currentQuestion = question();
+  const questionType = currentQuestion.questionType || 'trueFalse';
+  const isImageQuestion = isImageChoiceQuestion(currentQuestion);
+  const options = isImageQuestion
+    ? Array.from({ length: optionCountOf(currentQuestion) }, (_, index) => value(`q-option-label-${index}`) || `Đáp án ${String.fromCharCode(65 + index)}`)
+    : value('q-options')
+        .split('\n')
+        .map((item) => item.trim())
+        .filter(Boolean);
+  const audioItems = questionType === 'multiAudio'
+    ? Array.from({ length: 5 }, (_, index) => ({
+        url: value(`q-audio-url-${index}`),
+        fileName: value(`q-audio-name-${index}`),
+        answerIndex: Math.max(0, Math.min(options.length - 1, Number(value(`q-audio-answer-${index}`)) || 0)),
+      })).filter((item) => item.url)
+    : audioItemsOf(currentQuestion);
+  const body = {
+    title: value('q-title'),
+    questionType,
+    mode: value('q-mode'),
+    text: value('q-text'),
+    pinyin: value('q-pinyin'),
+    keyword: value('q-keyword'),
+    answerIndex: Math.max(0, Math.min(options.length - 1, Number(value('q-answer')) - 1)),
+    prompt: value('q-prompt'),
+    vietnamese: value('q-vietnamese'),
+    imageUrl: value('q-image-url'),
+    imageAlt: value('q-image-alt'),
+    optionImages: isImageQuestion ? Array.from({ length: optionCountOf(currentQuestion) }, (_, index) => value(`q-option-image-${index}`)) : optionImagesOf(currentQuestion),
+    options,
+    audioItems,
+    audioUrl: questionType === 'multiAudio' ? '' : currentQuestion.audioUrl,
+    audioFileName: questionType === 'multiAudio' ? '' : currentQuestion.audioFileName,
+  };
+  return withLoading('save-question', () =>
+    mutate(`/topics/${state.topicId}/sections/${state.sectionId}/lessons/${state.lessonId}/questions/${state.questionId}`, 'PATCH', body),
+  );
+}
+
+async function uploadQuestionAudioAtIndex(index) {
+  if (!question()) return;
+  const input = document.getElementById(`q-audio-file-${index}`);
+  const file = input?.files?.[0];
+  if (!file) {
+    showToast(t('chooseAudioFirst'));
+    render();
+    return;
+  }
+
+  return withLoading(`upload-audio-${index}`, async () => {
+    const formData = new FormData();
+    formData.append('audio', file);
+    const response = await fetch(
+      `${apiBase}/topics/${state.topicId}/sections/${state.sectionId}/lessons/${state.lessonId}/questions/${state.questionId}/audios/${index}`,
+      {
+        method: 'POST',
+        body: formData,
+      },
+    );
+    if (!response.ok) {
+      const errorText = await response.text();
+      showToast(response.status === 404 ? t('staleUploadRoute') : t('uploadFailed'));
+      throw new Error(errorText);
+    }
+    await loadTopics();
+    showToast(t('uploadedAudio'));
+  });
+}
+
+function clearQuestionAudioAtIndex(index) {
+  const current = question();
+  if (!current) return;
+  const items = Array.from({ length: 5 }, (_, itemIndex) => audioItemsOf(current)[itemIndex] || { url: '', fileName: '' });
+  items[index] = { url: '', fileName: '' };
+  current.audioItems = items.filter((item) => item.url);
+  render();
+}
+
+function chooseNextQuestionAudioFile() {
+  const current = question();
+  if (!current) return;
+  const index = Math.min(audioItemsOf(current).length, 4);
+  document.getElementById(`q-audio-file-${index}`)?.click();
+}
+
+function chooseNextQuestionImageFile() {
+  const current = question();
+  if (!current) return;
+  const images = optionImagesOf(current);
+  const emptyIndex = images.findIndex((image) => !image);
+  const index = emptyIndex === -1 ? 0 : emptyIndex;
+  document.getElementById(`q-option-file-${index}`)?.click();
+}
+
+function multiAudioAnswerIndex(item, audioIndex = state.multiAudioActiveIndex) {
+  const audio = audioItemsOf(item)[audioIndex];
+  return Number.isFinite(Number(audio?.answerIndex)) ? Number(audio.answerIndex) : Number(item?.answerIndex || 0);
+}
+
+function selectMultiAudioIndex(index) {
+  state.multiAudioActiveIndex = Math.max(0, Math.min(4, Number(index) || 0));
+  render();
+}
+
+function stopQuestionAudioPreview() {
+  if (state.previewAudioElement) {
+    state.previewAudioElement.pause();
+    state.previewAudioElement = null;
+  }
+  state.previewAudioTrackKey = '';
+  render();
+}
+
+function toggleQuestionAudioAtIndex(index) {
+  const current = question();
+  if (!current) return;
+  const audio = audioItemsOf(current)[index];
+  if (!audio?.url) {
+    showToast(t('noAudio'));
+    render();
+    return;
+  }
+  const trackKey = `${current.id || state.questionId}:${index}:${audio.url}`;
+  if (state.previewAudioElement && state.previewAudioTrackKey === trackKey) {
+    stopQuestionAudioPreview();
+    return;
+  }
+  if (state.previewAudioElement) {
+    state.previewAudioElement.pause();
+  }
+  const player = new Audio(audio.url);
+  state.previewAudioElement = player;
+  state.previewAudioTrackKey = trackKey;
+  player.onended = () => {
+    state.previewAudioElement = null;
+    state.previewAudioTrackKey = '';
+    render();
+  };
+  player.onerror = () => {
+    state.previewAudioElement = null;
+    state.previewAudioTrackKey = '';
+    showToast(t('audioLoadError') || 'Không phát được audio');
+    render();
+  };
+  player.play().catch(() => {
+    state.previewAudioElement = null;
+    state.previewAudioTrackKey = '';
+    showToast(t('audioLoadError') || 'Không phát được audio');
+    render();
+  });
+  render();
+}
+
+function questionTypeTabs(item) {
+  const type = item?.questionType || 'trueFalse';
+  return `
+    <div class="question-type-tabs question-type-tabs-three">
+      <button type="button" class="${type === 'trueFalse' ? 'active' : ''}" onclick="setQuestionType('trueFalse')">Đúng sai</button>
+      <button type="button" class="${type === 'image' ? 'active' : ''}" onclick="setQuestionType('image')">Hình ảnh</button>
+      <button type="button" class="${type === 'multiAudio' ? 'active' : ''}" onclick="setQuestionType('multiAudio')">Nhiều Audio</button>
+    </div>
+  `;
+}
+
+function questionCreatePicker(currentDay) {
+  const selectedType = state.createQuestionType || 'image';
+  return `
+    <div class="question-create-box">
+      <div class="section-title">${t('questionType')}</div>
+      <div class="question-create-options question-create-options-three">
+        <button type="button" class="${selectedType === 'image' ? 'active' : ''}" onclick="selectCreateQuestionType('image')" ${currentDay ? '' : 'disabled'}>
+          <strong>${t('imageQuestion')}</strong>
+          <span>${t('imageQuestionHint')}</span>
+        </button>
+        <button type="button" class="${selectedType === 'multiAudio' ? 'active' : ''}" onclick="selectCreateQuestionType('multiAudio')" ${currentDay ? '' : 'disabled'}>
+          <strong>Nhiều Audio</strong>
+          <span>Thêm 1-5 audio và chọn 1 hình đúng.</span>
+        </button>
+        <button type="button" class="${selectedType === 'trueFalse' ? 'active' : ''}" onclick="selectCreateQuestionType('trueFalse')" ${currentDay ? '' : 'disabled'}>
+          <strong>${t('trueFalseQuestion')}</strong>
+          <span>${t('trueFalseQuestionHint')}</span>
+        </button>
+      </div>
+      <button class="btn primary ${isLoading(`create-question-${selectedType}`) ? 'loading' : ''}" onclick="createQuestion()" ${loadingAttrs(`create-question-${selectedType}`)} ${currentDay ? '' : 'disabled'}>
+        ${loadingIcon(`create-question-${selectedType}`, 'plus')} ${t('createQuestion')}
+      </button>
+    </div>
+  `;
+}
+
+function audioListFields(item) {
+  const items = audioItemsOf(item);
+  const activeIndex = Math.max(0, Math.min(4, Number(state.multiAudioActiveIndex) || 0));
+  return `
+    <section class="multi-audio-admin" style="grid-column:1 / -1">
+      <div class="section-head-inline">
+        <div>
+          <div class="section-title">Danh sách audio</div>
+          <p class="muted">Thêm từ 1 đến 5 audio. Hệ thống sẽ phát ngẫu nhiên 1 audio.</p>
+        </div>
+        <button type="button" class="btn primary" onclick="chooseNextQuestionAudioFile()">${icon('plus', 15)} Thêm audio</button>
+      </div>
+      <div class="multi-audio-list">
+        ${Array.from({ length: 5 }, (_, index) => {
+          const audio = items[index] || { url: '', fileName: '' };
+          const answerIndex = Number.isFinite(Number(audio.answerIndex)) ? Number(audio.answerIndex) : Number(item.answerIndex || 0);
+          const audioTrackKey = `${item.id || state.questionId}:${index}:${audio.url}`;
+          const isPlaying = audio.url && state.previewAudioTrackKey === audioTrackKey;
+          return `
+            <div class="multi-audio-row ${index === activeIndex ? 'active' : ''}" onclick="selectMultiAudioIndex(${index})">
+              <span class="drag-handle">${icon('grip-vertical', 15)}</span>
+              <strong>${index + 1}.</strong>
+              <button type="button" class="audio-row-play ${isPlaying ? 'active' : ''}" onclick="event.stopPropagation(); toggleQuestionAudioAtIndex(${index})" ${audio.url ? '' : 'disabled'}>${icon(isPlaying ? 'pause' : 'play', 15)}</button>
+              <span class="audio-row-wave ${isPlaying ? 'active' : ''}"></span>
+              <span class="audio-row-duration">${audio.url ? '00:34' : '--:--'}</span>
+              <span class="audio-answer-pill">Đáp án ${String.fromCharCode(65 + answerIndex)}</span>
+              <input id="q-audio-url-${index}" type="hidden" value="${escapeAttr(audio.url)}" />
+              <input id="q-audio-name-${index}" type="hidden" value="${escapeAttr(audio.fileName || '')}" />
+              <input id="q-audio-answer-${index}" type="hidden" value="${answerIndex}" />
+              <label class="audio-file-label" onclick="event.stopPropagation()">
+                ${icon('pencil', 15)}
+                <input id="q-audio-file-${index}" type="file" accept="audio/*" onchange="uploadQuestionAudioAtIndex(${index})" />
+              </label>
+              <button type="button" class="icon-btn ${isLoading(`upload-audio-${index}`) ? 'loading' : ''}" onclick="event.stopPropagation(); uploadQuestionAudioAtIndex(${index})" ${loadingAttrs(`upload-audio-${index}`)} title="Tải audio">${loadingIcon(`upload-audio-${index}`, 'save')}</button>
+              <button type="button" class="icon-btn" onclick="event.stopPropagation(); clearQuestionAudioAtIndex(${index})" title="Xóa audio">${icon('trash', 15)}</button>
+            </div>
+          `;
+        }).join('')}
+      </div>
+      <p class="muted">Lưu ý: Tối đa 5 audio, mỗi audio tối đa 60 giây, định dạng MP3, WAV.</p>
+    </section>
+  `;
+}
+
+function optionImageFields(item, options) {
+  const images = optionImagesOf(item);
+  const activeAudioIndex = Math.max(0, Math.min(4, Number(state.multiAudioActiveIndex) || 0));
+  const activeAnswerIndex = item.questionType === 'multiAudio' ? multiAudioAnswerIndex(item, activeAudioIndex) : item.answerIndex;
+  return `
+    <section class="option-image-admin" style="grid-column:1 / -1">
+      <div class="section-head-inline">
+        <div>
+          <div class="section-title">${item.questionType === 'multiAudio' ? 'Đáp án (hình ảnh)' : t('optionImages')}</div>
+          <p class="muted">Thêm từ 2 đến ${optionCountOf(item)} hình ảnh. Chọn 1 hình đúng.</p>
+        </div>
+        <button type="button" class="btn primary" onclick="chooseNextQuestionImageFile()">${icon('plus', 15)} Thêm hình ảnh</button>
+      </div>
+      <div class="option-image-grid ${item.questionType === 'multiAudio' ? 'option-image-grid-five' : ''}">
+        ${Array.from({ length: optionCountOf(item) }, (_, index) => `
+          <div class="option-image-card ${activeAnswerIndex === index ? 'correct' : ''}">
+            <div class="option-image-head">
+              <span>${String.fromCharCode(65 + index)}</span>
+              <label class="answer-radio">
+                <input type="radio" name="q-answer-radio" ${activeAnswerIndex === index ? 'checked' : ''} onchange="setAnswerIndex(${index})" />
+                Đúng
+              </label>
+            </div>
+            <div class="option-image-preview">
+              ${
+                images[index]
+                  ? `<img src="${escapeAttr(images[index])}" alt="${escapeAttr(options[index] || `Đáp án ${String.fromCharCode(65 + index)}`)}" />`
+                  : `<div class="image-placeholder">${icon('image', 24)}<span>Ảnh ${String.fromCharCode(65 + index)}</span></div>`
+              }
+            </div>
+            <label>Đáp án ${String.fromCharCode(65 + index)}
+              <input id="q-option-label-${index}" type="text" value="${escapeAttr(options[index] || '')}" />
+            </label>
+            <label>URL ảnh ${String.fromCharCode(65 + index)}
+              <input id="q-option-image-${index}" type="url" value="${escapeAttr(images[index])}" placeholder="https://..." />
+            </label>
+            <label>File ảnh
+              <input id="q-option-file-${index}" type="file" accept="image/*" />
+            </label>
+            <button type="button" class="btn ${isLoading(`upload-image-${index}`) ? 'loading' : ''}" onclick="uploadQuestionOptionImage(${index})" ${loadingAttrs(`upload-image-${index}`)}>
+              ${loadingIcon(`upload-image-${index}`, 'save')} ${t('uploadImage')} ${String.fromCharCode(65 + index)}
+            </button>
+          </div>
+        `).join('')}
+      </div>
+      <p class="muted">Đáp án đúng: ${String.fromCharCode(65 + (Number(item.answerIndex) || 0))}</p>
+    </section>
+  `;
+}
+
+function questionForm(item) {
+  if (!item) return `<div class="empty">${t('chooseOrCreateQuestion')}</div>`;
+  const questionType = item.questionType || 'trueFalse';
+  const isImageQuestion = isImageChoiceQuestion(item);
+  const options = isImageQuestion ? imageChoiceOptions(item) : arrayOf(item.options);
+  return `
+    <form id="question-form" class="form-grid ${isImageQuestion ? 'image-question-form' : ''}">
+      <div style="grid-column:1 / -1">${questionTypeTabs(item)}</div>
+      ${input('q-title', t('questionName'), item.title)}
+      ${input('q-mode', t('questionMode'), item.mode)}
+      ${questionType === 'multiAudio' ? audioListFields(item) : ''}
+      ${isImageQuestion ? optionImageFields(item, options) : ''}
+      ${input('q-text', 'Nội dung nghe/đáp án', item.text)}
+      ${input('q-pinyin', 'Pinyin', item.pinyin)}
+      ${input('q-keyword', t('keyword'), item.keyword)}
+      ${input('q-answer', t('correctAnswer'), String(item.answerIndex + 1), 'number')}
+      ${textarea('q-prompt', t('visiblePrompt'), item.prompt)}
+      ${textarea('q-vietnamese', t('vietnameseMeaning'), item.vietnamese)}
+      ${
+        isImageQuestion
+          ? `<input id="q-image-url" type="hidden" value="${escapeAttr(item.imageUrl || '')}" /><input id="q-image-alt" type="hidden" value="${escapeAttr(item.imageAlt || '')}" /><textarea id="q-options" style="display:none">${escapeHtml(options.join('\n'))}</textarea>`
+          : textarea('q-options', t('options'), options.join('\n'))
+      }
+      ${
+        questionType !== 'multiAudio'
+          ? `
+            <label style="grid-column:1 / -1">${t('questionAudio')}
+              <input id="q-audio" type="file" accept="audio/*" />
+            </label>
+            <div style="grid-column:1 / -1">
+              ${
+                item.audioUrl
+                  ? `<audio controls src="${item.audioUrl}" style="width:100%;height:38px"></audio><p class="muted" style="margin:6px 0 0">${item.audioFileName || item.audioUrl}</p>`
+                  : `<p class="muted" style="margin:0">${t('noAudio')}</p>`
+              }
+            </div>
+          `
+          : ''
+      }
+      <div class="form-actions" style="grid-column:1 / -1">
+        <button type="button" class="btn primary ${isLoading('save-question') ? 'loading' : ''}" onclick="saveQuestion()" ${loadingAttrs('save-question')}>${loadingIcon('save-question', 'save')} ${t('saveQuestion')}</button>
+        ${
+          questionType !== 'multiAudio'
+            ? `<button type="button" class="btn ${isLoading('upload-audio') ? 'loading' : ''}" onclick="uploadQuestionAudio()" ${loadingAttrs('upload-audio')}>${loadingIcon('upload-audio', 'save')} ${t('uploadAudio')}</button>`
+            : ''
+        }
+        <button type="button" class="btn danger ${isLoading('delete-question') ? 'loading' : ''}" onclick="deleteQuestion()" ${loadingAttrs('delete-question')}>${loadingIcon('delete-question', 'trash')} ${t('deleteQuestion')}</button>
+      </div>
+    </form>
+  `;
+}
+
+function previewChoiceCard(item, index, options, images) {
+  const label = options[index] || `Dap an ${String.fromCharCode(65 + index)}`;
+  const image = images[index];
+  const isCorrect = item?.answerIndex === index;
+  return `
+    <div class="choice-card ${isCorrect ? 'correct' : ''}">
+      <span class="choice-letter">${String.fromCharCode(65 + index)}</span>
+      ${image ? `<img src="${escapeAttr(image)}" alt="${escapeAttr(label)}" />` : `<div class="choice-label">${escapeHtml(label)}</div>`}
+      ${isCorrect ? `<span class="choice-check">${icon('check', 14)}</span>` : ''}
+    </div>
+  `;
+}
+
+function studentPreview(item) {
+  if (!item) {
+    return `
+      <section class="preview-card">
+        <h3>Xem truoc giao dien hoc vien</h3>
+        <div class="empty">Chon hoac tao cau hoi de xem preview.</div>
+      </section>
+    `;
+  }
+  const questionType = item.questionType || 'trueFalse';
+  const isImageQuestion = isImageChoiceQuestion(item);
+  const options = isImageQuestion ? imageChoiceOptions(item) : arrayOf(item.options);
+  const images = optionImagesOf(item);
+  const optionCount = isImageQuestion ? optionCountOf(item) : Math.max(options.length, 2);
+  const audioCount = questionType === 'multiAudio' ? Math.max(audioItemsOf(item).length, 1) : 1;
+  return `
+    <section class="preview-card">
+      <h3>Xem truoc giao dien hoc vien</h3>
+      <div class="student-frame">
+        <p>${escapeHtml(item.prompt || 'Nghe doan am thanh va chon dap an dung')}</p>
+        <div class="audio-preview">
+          <span class="audio-play">${icon('volume-2', 18)}</span>
+          <span class="wave"></span>
+          <span class="muted">00:00 / 00:34</span>
+        </div>
+        <div class="choice-grid">
+          ${Array.from({ length: optionCount }, (_, index) => previewChoiceCard(item, index, options, images)).join('')}
+        </div>
+        ${
+          questionType === 'multiAudio'
+            ? `<div class="preview-note">${icon('info', 15)} Học viên sẽ nghe ngẫu nhiên 1 audio trong danh sách ${audioCount} audio ở bên.</div>`
+            : `<div class="preview-note">${icon('info', 15)} Học viên sẽ nghe ngẫu nhiên một audio trong danh sách của ngày học.</div>`
+        }
+      </div>
+    </section>
+  `;
+}
+
 Object.assign(window, {
   createTopic,
   saveTopic,
@@ -1902,6 +2691,12 @@ Object.assign(window, {
   createQuestion,
   saveQuestion,
   uploadQuestionAudio,
+  uploadQuestionAudioAtIndex,
+  clearQuestionAudioAtIndex,
+  toggleQuestionAudioAtIndex,
+  stopQuestionAudioPreview,
+  chooseNextQuestionAudioFile,
+  chooseNextQuestionImageFile,
   uploadQuestionOptionImage,
   deleteQuestion,
   selectTopic,
@@ -1913,6 +2708,9 @@ Object.assign(window, {
   selectCreateQuestionType,
   setQuestionType,
   setAnswerIndex,
+  selectMultiAudioIndex,
+  toggleTopicMetricsList,
+  selectTopicFromMetrics,
   refreshData,
   toggleAdminLanguage,
 });

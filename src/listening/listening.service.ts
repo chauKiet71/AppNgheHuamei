@@ -343,6 +343,10 @@ export class ListeningService {
     const topic = this.findTopic(topics, topicId);
     const track = this.findTrack(this.findLesson(this.findSectionInTopic(topic, sectionId), lessonId), trackId);
     Object.assign(track, this.clean(input));
+    if (input.audioItems !== undefined) {
+      track.audioItems = this.audioItemsOf(input);
+    }
+    track.optionImages = this.optionImagesForTrack(track);
     this.validateTrack(track);
     await this.saveTopic(topic, topics.indexOf(topic));
     return track;
@@ -379,6 +383,30 @@ export class ListeningService {
     return track;
   }
 
+  async attachTrackAudioAtIndex(
+    topicId: string,
+    sectionId: string,
+    lessonId: string,
+    trackId: string,
+    audioIndex: number,
+    audio: { fileName: string; url: string },
+  ): Promise<ListeningTrack> {
+    if (audioIndex < 0 || audioIndex > 4) {
+      throw new BadRequestException('Audio index must be between 0 and 4');
+    }
+    const topics = await this.loadTopics();
+    const topic = this.findTopic(topics, topicId);
+    const track = this.findTrack(this.findLesson(this.findSectionInTopic(topic, sectionId), lessonId), trackId);
+    const items = this.audioItemsOf(track) || [];
+    const nextItems = Array.from({ length: Math.max(items.length, audioIndex + 1) }, (_, index) => items[index] || { url: '' });
+    nextItems[audioIndex] = { answerIndex: items[audioIndex]?.answerIndex ?? track.answerIndex ?? 0, fileName: audio.fileName, url: audio.url };
+    track.audioItems = nextItems.filter((item) => item.url).slice(0, 5);
+    track.audioFileName = '';
+    track.audioUrl = '';
+    await this.saveTopic(topic, topics.indexOf(topic));
+    return track;
+  }
+
   async attachTrackOptionImage(
     topicId: string,
     sectionId: string,
@@ -390,10 +418,11 @@ export class ListeningService {
     const topics = await this.loadTopics();
     const topic = this.findTopic(topics, topicId);
     const track = this.findTrack(this.findLesson(this.findSectionInTopic(topic, sectionId), lessonId), trackId);
-    if (optionIndex < 0 || optionIndex > 3) {
-      throw new BadRequestException('Option image index must be between 0 and 3');
+    const maxOptionIndex = track.questionType === 'multiAudio' ? 4 : 3;
+    if (optionIndex < 0 || optionIndex > maxOptionIndex) {
+      throw new BadRequestException(`Option image index must be between 0 and ${maxOptionIndex}`);
     }
-    track.optionImages = this.fourOptionImages(track.optionImages);
+    track.optionImages = this.optionImagesForTrack(track);
     track.optionImages[optionIndex] = imageUrl;
     await this.saveTopic(topic, topics.indexOf(topic));
     return track;
@@ -467,13 +496,14 @@ export class ListeningService {
       vietnamese: input.vietnamese || 'Xin chào.',
       prompt: input.prompt || 'Người nói muốn diễn đạt điều gì?',
       options: input.options?.length ? input.options : ['Đáp án A', 'Đáp án B', 'Đáp án C', 'Đáp án D'],
-      optionImages: this.fourOptionImages(input.optionImages),
+      optionImages: this.optionImagesForTrack(input),
       answerIndex: input.answerIndex ?? 0,
       keyword: input.keyword || '你好',
       imageUrl: input.imageUrl,
       imageAlt: input.imageAlt,
       audioUrl: input.audioUrl,
       audioFileName: input.audioFileName,
+      audioItems: this.audioItemsOf(input),
     };
     this.validateTrack(track);
     return track;
@@ -486,10 +516,33 @@ export class ListeningService {
     if (track.answerIndex < 0 || track.answerIndex >= track.options.length) {
       throw new BadRequestException('answerIndex is out of option range');
     }
+    if (track.audioItems?.some((item) => item.answerIndex !== undefined && (item.answerIndex < 0 || item.answerIndex >= track.options.length))) {
+      throw new BadRequestException('audioItems answerIndex is out of option range');
+    }
   }
 
   private fourOptionImages(images?: string[]): string[] {
     return Array.from({ length: 4 }, (_, index) => images?.[index] || '');
+  }
+
+  private optionImagesForTrack(track: Pick<ListeningTrack, 'questionType' | 'optionImages'>): string[] {
+    const count = track.questionType === 'multiAudio' ? 5 : 4;
+    return Array.from({ length: count }, (_, index) => track.optionImages?.[index] || '');
+  }
+
+  private audioItemsOf(input: TrackInput): { url: string; fileName?: string; answerIndex?: number }[] | undefined {
+    const items = (input.audioItems || [])
+      .map((item) => ({
+        url: item?.url || '',
+        fileName: item?.fileName,
+        answerIndex: item?.answerIndex,
+      }))
+      .filter((item) => item.url)
+      .slice(0, 5);
+    if (items.length) {
+      return items;
+    }
+    return undefined;
   }
 
   private normalizeTopic(topic: ListeningTopic): ListeningTopic {

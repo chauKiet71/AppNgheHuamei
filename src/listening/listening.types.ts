@@ -1,8 +1,14 @@
+export interface ListeningAudioItem {
+  url: string;
+  fileName?: string;
+  answerIndex?: number;
+}
+
 export interface ListeningTrack {
   id: string;
   title: string;
   subtitle: string;
-  questionType?: 'trueFalse' | 'image';
+  questionType?: 'trueFalse' | 'image' | 'multiAudio';
   mode: string;
   text: string;
   pinyin: string;
@@ -16,6 +22,7 @@ export interface ListeningTrack {
   imageAlt?: string;
   audioUrl?: string;
   audioFileName?: string;
+  audioItems?: ListeningAudioItem[];
 }
 
 export interface ListeningDay {

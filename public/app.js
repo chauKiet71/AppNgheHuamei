@@ -9,19 +9,26 @@ const state = {
   index: 0,
   answers: [],
   selected: null,
+  multiAudioSelections: [],
+  multiAudioAttempts: [],
   checked: false,
   audioPlaying: false,
   audioRemaining: 0,
   audioDuration: 0,
   audioTrackId: null,
+  audioItemIndex: null,
+  selectedAudioItemIndex: 0,
   audioTimer: null,
   audioElement: null,
   sessionStartedAt: null,
-  locale: 'vi',
+  locale: ['vi', 'zh'].includes(localStorage.getItem('locale')) ? localStorage.getItem('locale') : 'vi',
   authToken: localStorage.getItem('authToken') || '',
   user: null,
   authLoading: false,
   authError: '',
+  profileEditing: false,
+  avatarUploading: false,
+  historyExpanded: false,
 };
 
 const iconMap = {
@@ -439,19 +446,84 @@ function trackText(track, field) {
 }
 
 function trackOptions(track) {
-  if (track.questionType === 'image') {
+  if (track.questionType === 'image' || track.questionType === 'multiAudio') {
     return track.options;
   }
   return localizedContent[state.locale]?.phrases?.[phraseKey(track)]?.options || track.options;
 }
 
+function optionCountOf(track) {
+  return track?.questionType === 'multiAudio' ? 5 : 4;
+}
+
 function optionImagesOf(track) {
   const images = Array.isArray(track.optionImages) ? track.optionImages : [];
-  return Array.from({ length: 4 }, (_, index) => images[index] || '');
+  return Array.from({ length: optionCountOf(track) }, (_, index) => images[index] || '');
+}
+
+function audioItemsOf(track) {
+  return Array.isArray(track?.audioItems)
+    ? track.audioItems
+        .map((item) => ({ url: item?.url || '', fileName: item?.fileName || '', answerIndex: Number.isFinite(Number(item?.answerIndex)) ? Number(item.answerIndex) : Number(track?.answerIndex || 0) }))
+        .filter((item) => item.url)
+        .slice(0, 5)
+    : [];
 }
 
 function isImageQuestion(track) {
   return track.questionType === 'image' && optionImagesOf(track).some(Boolean);
+}
+
+function isMultiAudioQuestion(track) {
+  return track?.questionType === 'multiAudio' || audioItemsOf(track).length > 0 || optionImagesOf(track).length >= 5;
+}
+
+function answerIndexForTrack(track) {
+  if (!isMultiAudioQuestion(track)) {
+    return track.answerIndex;
+  }
+  const audio = audioItemsOf(track)[state.selectedAudioItemIndex] || audioItemsOf(track)[0];
+  return Number.isFinite(Number(audio?.answerIndex)) ? Number(audio.answerIndex) : Number(track.answerIndex || 0);
+}
+
+function multiAudioRequiredCount(track) {
+  return Math.min(5, Math.max(1, audioItemsOf(track).length || optionImagesOf(track).filter(Boolean).length || optionCountOf(track)));
+}
+
+function multiAudioSelectionAt(index) {
+  const value = state.multiAudioSelections[index];
+  return Number.isFinite(Number(value)) ? Number(value) : null;
+}
+
+function isMultiAudioComplete(track) {
+  const required = multiAudioRequiredCount(track);
+  return Array.from({ length: required }, (_, index) => multiAudioSelectionAt(index)).every((value) => value !== null);
+}
+
+function isMultiAudioStepSolved(track, audioIndex) {
+  const selected = multiAudioSelectionAt(audioIndex);
+  const expected = Number(audioItemsOf(track)[audioIndex]?.answerIndex ?? track.answerIndex ?? 0);
+  return selected === expected;
+}
+
+function firstUnsolvedMultiAudioIndex(track) {
+  const required = multiAudioRequiredCount(track);
+  const index = Array.from({ length: required }, (_, itemIndex) => itemIndex).find((itemIndex) => !isMultiAudioStepSolved(track, itemIndex));
+  return index === undefined ? required - 1 : index;
+}
+
+function isMultiAudioRowUnlocked(track, audioIndex) {
+  return audioIndex <= firstUnsolvedMultiAudioIndex(track);
+}
+
+function multiAudioCorrect(track) {
+  const audioItems = audioItemsOf(track);
+  const required = multiAudioRequiredCount(track);
+  return Array.from({ length: required }, (_, index) => {
+    const selected = multiAudioSelectionAt(index);
+    const expected = Number.isFinite(Number(audioItems[index]?.answerIndex)) ? Number(audioItems[index].answerIndex) : Number(track.answerIndex || 0);
+    return selected === expected;
+  }).every(Boolean);
 }
 
 function modeOf(track) {
@@ -469,6 +541,7 @@ function languageToggle() {
 
 function toggleLanguage() {
   state.locale = state.locale === 'vi' ? 'zh' : 'vi';
+  localStorage.setItem('locale', state.locale);
   render();
 }
 
@@ -479,7 +552,7 @@ async function init() {
 }
 
 async function loadTopics() {
-  const response = await fetch('/api/listening/topics');
+  const response = await apiFetch('/api/listening/topics');
   state.topics = await response.json();
   if (!state.topicId || !currentTopic()) {
     state.topicId = state.topics[0]?.id || null;
@@ -496,6 +569,14 @@ async function loadTopics() {
   if (!state.dayId || !currentDay()) {
     state.dayId = daysOf(currentLesson())?.[0]?.id || null;
   }
+}
+
+async function apiFetch(path, options = {}) {
+  const response = await fetch(path, options);
+  if (response.status !== 404 || window.location.port !== '3000') {
+    return response;
+  }
+  return fetch(`http://localhost:3100${path}`, options);
 }
 
 function currentTopic() {
@@ -577,6 +658,7 @@ function tracksOfDay(day) {
 }
 
 function questionTypeOf(track) {
+  if (track?.questionType === 'multiAudio') return 'multiAudio';
   return track?.questionType === 'image' ? 'image' : 'trueFalse';
 }
 
@@ -588,15 +670,94 @@ function currentTracks() {
   return tracksOfDay(currentDay());
 }
 
+function progressUserKey() {
+  return state.user?.id || 'guest';
+}
+
+function dayProgressKey(dayId) {
+  return `listeningProgress:${progressUserKey()}:${dayId}`;
+}
+
+function learningHistoryKey() {
+  return `learningHistory:${progressUserKey()}`;
+}
+
+function readLearningHistory() {
+  try {
+    const records = JSON.parse(localStorage.getItem(learningHistoryKey()) || '[]');
+    return Array.isArray(records) ? records : [];
+  } catch (error) {
+    return [];
+  }
+}
+
+function writeLearningHistory(records) {
+  localStorage.setItem(learningHistoryKey(), JSON.stringify(records.slice(0, 80)));
+}
+
+function isDayCompleted(dayId) {
+  return localStorage.getItem(dayProgressKey(dayId)) === 'done';
+}
+
+function markCurrentDayCompleted() {
+  const day = currentDay();
+  if (day?.id) {
+    localStorage.setItem(dayProgressKey(day.id), 'done');
+  }
+  recordLearningHistory();
+}
+
+function recordLearningHistory() {
+  const day = currentDay();
+  const lesson = currentLesson();
+  if (!day?.id) {
+    return;
+  }
+  const tracks = currentTracks();
+  const answers = state.answers.filter(Boolean);
+  const total = tracks.length || answers.length || 1;
+  const answered = answers.length || total;
+  const correct = answers.filter((answer) => answer.correct).length;
+  const completedAt = new Date().toISOString();
+  const durationSeconds = Math.max(60, Math.round((Date.now() - (state.sessionStartedAt || Date.now())) / 1000));
+  const entry = {
+    id: `${day.id}:${Date.now()}`,
+    completedAt,
+    durationSeconds,
+    topicId: state.topicId,
+    levelId: state.levelId,
+    sectionId: state.sectionId,
+    lessonId: state.lessonId,
+    dayId: day.id,
+    topicTitle: textOf(currentTopic(), 'title'),
+    levelTitle: textOf(currentLevel(), 'title'),
+    sectionTitle: textOf(currentSection(), 'title'),
+    lessonTitle: textOf(lesson, 'title'),
+    dayTitle: textOf(day, 'title') || day.title || '',
+    correct,
+    answered,
+    total,
+    accuracy: Math.round((correct / Math.max(1, answered)) * 100) || 0,
+  };
+  writeLearningHistory([entry, ...readLearningHistory()]);
+}
+
 function icon(name, size = 19) {
   return `<i data-lucide="${iconMap[name] || name}" style="width:${size}px;height:${size}px"></i>`;
 }
 
 function mount(html) {
   $app.innerHTML = html;
+  const cameraButton = document.querySelector('.account-camera-btn');
+  if (cameraButton && state.avatarUploading) {
+    cameraButton.classList.add('loading');
+    cameraButton.disabled = true;
+    cameraButton.innerHTML = icon('loader-circle', 19);
+  }
   if (window.lucide) {
     window.lucide.createIcons();
   }
+  cameraButton?.addEventListener('click', chooseProfileAvatar);
 }
 
 function nav(active = 'home') {
@@ -633,7 +794,7 @@ function handleNav(id) {
     state.screen = 'home';
   }
   if (id === 'file') {
-    state.screen = state.answers.length ? 'report' : 'home';
+    state.screen = 'history';
   }
   if (id === 'profile') {
     state.screen = 'profile';
@@ -643,6 +804,7 @@ function handleNav(id) {
 
 function go(screen, payload = {}) {
   stopAudio();
+  const requestedIndex = Number(payload.index);
   Object.assign(state, payload);
   state.screen = screen;
   if (screen === 'login' || screen === 'register') {
@@ -659,9 +821,11 @@ function go(screen, payload = {}) {
     state.dayId = null;
   }
   if (screen === 'practice') {
-    state.index = 0;
+    state.index = Number.isFinite(requestedIndex) ? Math.max(0, requestedIndex) : 0;
     state.answers = [];
     state.selected = null;
+    state.multiAudioSelections = [];
+    state.multiAudioAttempts = [];
     state.checked = false;
     state.sessionStartedAt = Date.now();
   }
@@ -677,6 +841,7 @@ function back() {
     days: 'sections',
     practice: 'days',
     report: 'home',
+    history: 'profile',
     login: 'profile',
     register: 'login',
   };
@@ -693,6 +858,7 @@ function render() {
     days: renderDays,
     practice: renderPractice,
     report: renderReport,
+    history: renderHistory,
     profile: renderProfile,
     login: renderLogin,
     register: renderRegister,
@@ -753,13 +919,190 @@ function renderHome() {
   `);
 }
 
+function historyDateKey(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function learningStreak(records) {
+  const learnedDays = new Set(records.map((record) => historyDateKey(record.completedAt)).filter(Boolean));
+  let streak = 0;
+  const cursor = new Date();
+  while (learnedDays.has(historyDateKey(cursor))) {
+    streak += 1;
+    cursor.setDate(cursor.getDate() - 1);
+  }
+  return streak;
+}
+
+function formatStudyDuration(totalSeconds) {
+  const seconds = Math.max(0, Number(totalSeconds) || 0);
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.round((seconds % 3600) / 60);
+  if (hours > 0) {
+    return `${hours}h ${minutes}m`;
+  }
+  return `${Math.max(1, minutes)}m`;
+}
+
+function relativeStudyDate(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+  const today = new Date();
+  const startToday = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+  const startDate = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  const diffDays = Math.round((startToday - startDate) / 86400000);
+  if (state.locale === 'zh') {
+    if (diffDays === 0) return '今天';
+    if (diffDays === 1) return '昨天';
+    return `${diffDays} 天前`;
+  }
+  if (diffDays === 0) return 'Hôm nay';
+  if (diffDays === 1) return 'Hôm qua';
+  return `${diffDays} ngày trước`;
+}
+
+function historyRouteTitle(record) {
+  return [record.sectionTitle, record.lessonTitle].filter(Boolean).join(' - ') || record.dayTitle || t('listen');
+}
+
+function openHistoryEntry(entryId) {
+  const entry = readLearningHistory().find((record) => record.id === entryId);
+  if (!entry) {
+    return;
+  }
+  Object.assign(state, {
+    topicId: entry.topicId || state.topicId,
+    levelId: entry.levelId || state.levelId,
+    sectionId: entry.sectionId || state.sectionId,
+    lessonId: entry.lessonId || state.lessonId,
+    dayId: entry.dayId || state.dayId,
+  });
+  go('days');
+}
+
+function showAllLearningHistory() {
+  state.historyExpanded = true;
+  renderHistory();
+}
+
+function renderHistory() {
+  const isZh = state.locale === 'zh';
+  const records = readLearningHistory();
+  const totalTime = records.reduce((sum, record) => sum + (Number(record.durationSeconds) || 0), 0);
+  const averageAccuracy = records.length
+    ? Math.round(records.reduce((sum, record) => sum + (Number(record.accuracy) || 0), 0) / records.length)
+    : 0;
+  const recentRecords = state.historyExpanded ? records : records.slice(0, 5);
+  const title = isZh ? '学习历史' : 'Lịch sử học tập';
+  const emptyTitle = isZh ? '还没有学习记录' : 'Chưa có lịch sử học tập';
+  const emptyCopy = isZh ? '完成一次练习后，最近学习路线会保存在这里。' : 'Hoàn thành một ngày luyện để lưu lại lộ trình gần đây.';
+
+  mount(`
+    <section class="history-screen">
+      <header class="history-head">
+        <button class="icon-btn" type="button" onclick="back()" aria-label="${t('back')}">${icon('back', 21)}</button>
+        <h1>${title}</h1>
+        <span></span>
+      </header>
+
+      <section class="history-summary-grid">
+        <div class="history-stat-card streak">
+          <span>${isZh ? '连续学习' : 'Chuỗi ngày học'}</span>
+          <strong>${learningStreak(records)}</strong>
+          <small>${isZh ? '天' : 'ngày'}</small>
+          <em>${icon('flame', 26)}</em>
+        </div>
+        <div class="history-stat-card">
+          <span>${isZh ? '总时间' : 'Tổng thời gian'}</span>
+          <strong>${formatStudyDuration(totalTime)}</strong>
+          <em>${icon('clock-3', 25)}</em>
+        </div>
+      </section>
+
+      <section class="history-section">
+        <h2>${isZh ? '统计' : 'Thống kê'}</h2>
+        <div class="history-stats-panel">
+          <div>
+            <span>${isZh ? '已完成课程' : 'Bài đã hoàn thành'}</span>
+            <strong>${records.length}</strong>
+          </div>
+          <div>
+            <span>${isZh ? '平均正确率' : 'Tỷ lệ đúng trung bình'}</span>
+            <strong>${averageAccuracy}%</strong>
+          </div>
+        </div>
+      </section>
+
+      <section class="history-section">
+        <h2>${isZh ? '最近' : 'Gần đây'}</h2>
+        ${
+          recentRecords.length
+            ? `<div class="history-recent-list">
+                ${recentRecords
+                  .map(
+                    (record) => `
+                      <button class="history-row" type="button" onclick="openHistoryEntry('${record.id}')">
+                        <span class="history-row-icon">${icon('notebook-tabs', 18)}</span>
+                        <span class="history-row-main">
+                          <strong>${escapeHtml(historyRouteTitle(record))}</strong>
+                          <small>${record.correct}/${record.answered} ${isZh ? '正确' : 'đúng'}</small>
+                        </span>
+                        <span class="history-row-meta">
+                          <strong>${formatClock(record.completedAt)}</strong>
+                          <small>${relativeStudyDate(record.completedAt)}</small>
+                        </span>
+                      </button>
+                    `,
+                  )
+                  .join('')}
+              </div>
+              ${
+                records.length > 5 && !state.historyExpanded
+                  ? `<button class="history-view-all" type="button" onclick="showAllLearningHistory()">
+                      <span>${isZh ? '查看全部历史' : 'Xem tất cả lịch sử'}</span>
+                      ${icon('next', 22)}
+                    </button>`
+                  : ''
+              }`
+            : `<div class="history-empty">
+                <span>${icon('calendar-days', 28)}</span>
+                <strong>${emptyTitle}</strong>
+                <p>${emptyCopy}</p>
+                <button class="primary-btn" type="button" onclick="go('home')">${t('startSession')}</button>
+              </div>`
+        }
+      </section>
+    </section>
+    ${nav('file')}
+  `);
+}
+
 function renderProfile() {
+  const isZh = state.locale === 'zh';
+  const accountTitle = isZh ? '账户信息' : 'Thông tin tài khoản';
+  const logoutLabel = t('logout');
+  if (state.user && state.profileEditing) {
+    mount(accountEditorPage());
+    return;
+  }
   const settingItems = [
-    ['sync', t('syncExtension')],
-    ['translate', t('nativeLanguage')],
-    ['graduation', t('levelSetting')],
-    ['goal', t('goalSetting')],
-    ['grid', t('topicSetting')],
+    ['globe-2', isZh ? '语言设置' : 'Cài đặt ngôn ngữ', '', 'toggleLanguage()'],
+    ['languages', isZh ? '切换 中文 / VI' : 'Chuyển 中文 / VI', isZh ? '中文' : 'VI', 'toggleLanguage()'],
+    ['calendar-days', isZh ? '学习历史' : 'Lịch sử học tập', '', "go('history')"],
+    ['info', isZh ? '关于' : 'Giới thiệu'],
+    ['message-circle', isZh ? 'Zalo 支持' : 'Hỗ trợ Zalo'],
+  ];
+  const supportItems = [
+    ['user-round', isZh ? '登录问题' : 'Vấn đề đăng nhập'],
+    ['credit-card', isZh ? '解锁 / 购买套餐' : 'Mở khóa / mua gói'],
+    ['message-square-text', isZh ? '内容反馈' : 'Góp ý nội dung'],
+    ['bug', isZh ? '功能错误' : 'Lỗi chức năng'],
   ];
 
   mount(`
@@ -769,13 +1112,13 @@ function renderProfile() {
       ${
         state.user
           ? `<section class="login-card user-card">
-              <span class="avatar-placeholder signed-in"><span>${initialsOf(state.user.name)}</span></span>
+              ${userAvatar('avatar-placeholder signed-in', 76)}
               <span>
                 <small>${t('welcomeBack')}</small>
                 <strong>${escapeHtml(state.user.name)}</strong>
                 <em>${escapeHtml(state.user.email)}</em>
               </span>
-              <button class="logout-btn" type="button" onclick="logout()">${t('logout')}</button>
+              <button class="profile-edit-btn" type="button" onclick="openProfileEditor()" aria-label="${accountTitle}">${icon('square-pen', 22)}</button>
             </section>`
           : `<button class="login-card" type="button" onclick="go('login')">
               <span class="avatar-placeholder"><span></span></span>
@@ -791,13 +1134,205 @@ function renderProfile() {
         <p>${t('proHint')}</p>
       </section>
 
+      ${state.user && state.profileEditing ? accountEditor() : ''}
+
       <h2 class="profile-section-title">${t('settings')}</h2>
       <section class="settings-card">
-        ${settingItems.map(([itemIcon, label]) => settingRow(itemIcon, label)).join('')}
+        ${settingItems.map(([itemIcon, label, badge, action]) => settingRow(itemIcon, label, badge, action)).join('')}
       </section>
+
+      <section class="zalo-support-card">
+        <div class="zalo-support-copy">
+          <h3>${isZh ? '通过 Zalo 支持' : 'Hỗ trợ qua Zalo'} <span>${isZh ? '(仅支持软件问题)' : '(chỉ hỗ trợ phần mềm)'}</span></h3>
+          <p>${isZh ? '我们仅支持与软件相关的问题，不提供课程咨询。' : 'Chúng tôi hỗ trợ các vấn đề liên quan đến phần mềm, không tư vấn khóa học.'}</p>
+        </div>
+        <div class="settings-card support-list">
+          ${supportItems.map(([itemIcon, label]) => settingRow(itemIcon, label)).join('')}
+        </div>
+        <a class="zalo-phone-button" href="tel:0825319378">
+          ${icon('phone-call', 24)}
+          <strong>0825319378</strong>
+        </a>
+      </section>
+
+      ${state.user ? `<button class="profile-logout-bottom" type="button" onclick="logout()">${icon('log-out', 20)} <span>${logoutLabel}</span></button>` : ''}
     </section>
     ${nav('profile')}
   `);
+}
+
+function accountEditor() {
+  const isZh = state.locale === 'zh';
+  return `
+    <section class="account-edit-card">
+      <div class="account-edit-head">
+        <span class="avatar-placeholder signed-in small"><span>${initialsOf(state.user.name)}</span></span>
+        <div>
+          <h3>${isZh ? '更新账户信息' : 'Cập nhật tài khoản'}</h3>
+          <p>${isZh ? '编辑姓名、邮箱或设置新密码。' : 'Chỉnh sửa họ tên, email hoặc đặt mật khẩu mới.'}</p>
+        </div>
+        <button class="account-close-btn" type="button" onclick="closeProfileEditor()" aria-label="${isZh ? '关闭' : 'Đóng'}">${icon('x', 20)}</button>
+      </div>
+
+      <label class="profile-field">
+        <span>${isZh ? '姓名' : 'Họ và tên'}</span>
+        <input id="profile-name" type="text" value="${escapeHtml(state.user.name)}" autocomplete="name" />
+      </label>
+
+      <label class="profile-field">
+        <span>Email</span>
+        <input id="profile-email" type="email" value="${escapeHtml(state.user.email)}" autocomplete="email" />
+      </label>
+
+      <label class="profile-field">
+        <span>${isZh ? '新密码' : 'Mật khẩu mới'}</span>
+        <input id="profile-password" type="password" placeholder="${isZh ? '不更改请留空' : 'Bỏ trống nếu không đổi'}" autocomplete="new-password" />
+      </label>
+
+      ${authMessage()}
+
+      <div class="account-edit-actions">
+        <button class="profile-save-btn" type="button" onclick="submitProfileUpdate()" ${state.authLoading ? 'disabled' : ''}>
+          ${state.authLoading ? (isZh ? '正在保存...' : 'Đang lưu...') : icon('save', 18)}
+          <span>${state.authLoading ? '' : isZh ? '保存' : 'Lưu thay đổi'}</span>
+        </button>
+        <button class="profile-cancel-btn" type="button" onclick="closeProfileEditor()">${isZh ? '取消' : 'Hủy'}</button>
+      </div>
+    </section>
+  `;
+}
+
+function accountEditorPage() {
+  const isZh = state.locale === 'zh';
+  const userId = String(state.user?.id || '').replace(/^user-/, '').slice(0, 8) || '1903612';
+  const createdAt = state.user?.createdAt ? formatClock(Date.parse(state.user.createdAt)) : formatClock(Date.now());
+  const saveText = state.authLoading ? (isZh ? '保存中' : 'Đang lưu') : isZh ? '保存' : 'Lưu';
+  return `
+    <section class="account-edit-screen">
+      <input id="profile-avatar-input" class="visually-hidden-input" type="file" accept="image/*" onchange="handleProfileAvatarChange(event)" />
+      <header class="account-edit-topbar">
+        <button class="account-back-btn" type="button" onclick="closeProfileEditor()" aria-label="${t('back')}">${icon('back', 25)}</button>
+        <h1>${isZh ? '账户' : 'Tài khoản'}</h1>
+        <button class="account-save-top" type="button" onclick="submitProfileUpdate()" ${state.authLoading ? 'disabled' : ''}>${saveText}</button>
+      </header>
+
+      <section class="account-hero-card">
+        <div class="account-avatar-wrap">
+          ${userAvatar('account-avatar', 112)}
+          <button class="account-camera-btn" type="button" aria-label="${isZh ? '更换头像' : 'Đổi ảnh đại diện'}">${icon('camera', 19)}</button>
+        </div>
+
+        <label class="account-field full">
+          <span>${isZh ? '账户名称' : 'Tên tài khoản'}</span>
+          <span class="account-input-wrap">
+            <input id="profile-name" type="text" value="${escapeHtml(state.user.name)}" autocomplete="name" />
+            ${icon('square-pen', 20)}
+          </span>
+        </label>
+
+        <div class="account-row-line">
+          <span>${isZh ? '等级' : 'Cấp độ'}</span>
+          <select id="profile-level">
+            <option>${isZh ? '选择你的水平' : 'Chọn trình độ của bạn'}</option>
+            <option>HSK1</option>
+            <option>HSK2</option>
+            <option>HSK3</option>
+            <option>HSK4</option>
+          </select>
+        </div>
+
+        <label class="account-row-line password-line">
+          <span>${isZh ? '密码' : 'Mật khẩu'}</span>
+          <input id="profile-password" type="password" placeholder="${isZh ? '更改密码' : 'Đổi mật khẩu'}" autocomplete="new-password" />
+        </label>
+      </section>
+
+      <section class="account-info-card">
+        <label class="account-field full">
+          <span>Email</span>
+          <input id="profile-email" type="email" value="${escapeHtml(state.user.email)}" autocomplete="email" />
+        </label>
+
+        <div class="account-meta-grid">
+          ${accountMeta('VIP', isZh ? '免费' : 'Miễn phí', 'crown')}
+          ${accountMeta('AI', isZh ? '免费' : 'Miễn phí', 'sparkles')}
+          ${accountMeta('ID', userId, 'badge')}
+          ${accountMeta(isZh ? '徽章' : 'Huy hiệu', isZh ? '新会员' : 'Thành viên mới', 'star')}
+          ${accountMeta(isZh ? '登录方式' : 'Đăng nhập với', 'Google', 'mail')}
+          ${accountMeta(isZh ? '语言' : 'Ngôn ngữ', isZh ? '中文' : 'Tiếng Việt', 'languages')}
+          ${accountMeta(isZh ? '设备数' : 'Số thiết bị', '1', 'smartphone')}
+          ${accountMeta(isZh ? '创建时间' : 'Tạo lúc', createdAt, 'calendar')}
+        </div>
+      </section>
+
+      ${authMessage()}
+    </section>
+  `;
+}
+
+function accountMeta(label, value, itemIcon) {
+  return `
+    <div class="account-meta">
+      <span>${label}</span>
+      <strong>${icon(itemIcon, 16)} ${escapeHtml(value)}</strong>
+    </div>
+  `;
+}
+
+function userAvatar(className, size) {
+  const avatarUrl = state.user?.avatarUrl || '';
+  if (avatarUrl) {
+    return `<span class="${className}" style="--avatar-size:${size}px"><img src="${avatarUrl}" alt="${escapeHtml(state.user?.name || 'Avatar')}" /></span>`;
+  }
+  const limit = className.includes('account-avatar') ? 1 : 2;
+  return `<span class="${className}" style="--avatar-size:${size}px"><span>${initialsOf(state.user?.name).slice(0, limit)}</span></span>`;
+}
+
+function chooseProfileAvatar() {
+  if (state.avatarUploading) {
+    return;
+  }
+  document.querySelector('#profile-avatar-input')?.click();
+}
+
+function handleProfileAvatarChange(event) {
+  const file = event.target.files?.[0];
+  if (!file) {
+    return;
+  }
+  if (!file.type.startsWith('image/')) {
+    state.authError = 'Vui lòng chọn tệp hình ảnh.';
+    renderProfile();
+    return;
+  }
+  uploadProfileAvatar(file);
+}
+
+async function uploadProfileAvatar(file) {
+  const formData = new FormData();
+  formData.append('avatar', file);
+  state.avatarUploading = true;
+  state.authError = '';
+  renderProfile();
+  try {
+    const response = await apiFetch('/api/auth/me/avatar', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${state.authToken}` },
+      body: formData,
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data.message || 'Không thể tải ảnh đại diện.');
+    }
+    state.user = data;
+    localStorage.setItem('authUser', JSON.stringify(state.user));
+    state.avatarUploading = false;
+    renderProfile();
+  } catch (error) {
+    state.authError = error.message;
+    state.avatarUploading = false;
+    renderProfile();
+  }
 }
 
 function renderLogin() {
@@ -895,12 +1430,12 @@ function renderRegister() {
   `);
 }
 
-function settingRow(itemIcon, label) {
+function settingRow(itemIcon, label, badge = '', action = '') {
   return `
-    <button class="setting-row" type="button">
+    <button class="setting-row" type="button" ${action ? `onclick="${action}"` : ''}>
       <span class="setting-icon">${icon(itemIcon, 24)}</span>
       <span>${label}</span>
-      <span class="setting-chevron">${icon('next', 26)}</span>
+      ${badge ? `<span class="setting-badge">${badge}</span>` : `<span class="setting-chevron">${icon('next', 26)}</span>`}
     </button>
   `;
 }
@@ -913,11 +1448,12 @@ function setAuth(result) {
   state.authToken = result.token;
   state.user = result.user;
   localStorage.setItem('authToken', result.token);
+  localStorage.setItem('authUser', JSON.stringify(result.user));
   state.authError = '';
 }
 
 async function authRequest(path, body) {
-  const response = await fetch(`/api/auth/${path}`, {
+  const response = await apiFetch(`/api/auth/${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -929,12 +1465,80 @@ async function authRequest(path, body) {
   return data;
 }
 
+async function authFetch(path, options = {}) {
+  const response = await apiFetch(`/api/auth/${path}`, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${state.authToken}`,
+      ...(options.headers || {}),
+    },
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.message || t('authRequired'));
+  }
+  return data;
+}
+
+function openProfileEditor() {
+  state.profileEditing = true;
+  state.authError = '';
+  renderProfile();
+}
+
+function closeProfileEditor() {
+  state.profileEditing = false;
+  state.authError = '';
+  renderProfile();
+}
+
+async function submitProfileUpdate() {
+  const name = document.querySelector('#profile-name')?.value || '';
+  const email = document.querySelector('#profile-email')?.value || '';
+  const password = document.querySelector('#profile-password')?.value || '';
+  if (!name || !email) {
+    state.authError = t('authRequired');
+    renderProfile();
+    return;
+  }
+
+  state.authLoading = true;
+  state.authError = '';
+  renderProfile();
+  try {
+    const avatarUrl = state.user?.avatarUrl || '';
+    const updatedUser = await authFetch('me', {
+      method: 'PATCH',
+      body: JSON.stringify({ name, email, password, avatarUrl }),
+    });
+    state.user = { ...updatedUser, avatarUrl: updatedUser.avatarUrl || avatarUrl };
+    localStorage.setItem('authUser', JSON.stringify(state.user));
+    state.profileEditing = false;
+    state.authLoading = false;
+    renderProfile();
+  } catch (error) {
+    if (window.location.port === '3000' && state.user) {
+      state.user = { ...state.user, name: name.trim(), email: email.trim().toLowerCase(), avatarUrl: state.user?.avatarUrl || '' };
+      localStorage.setItem('authUser', JSON.stringify(state.user));
+      state.profileEditing = false;
+      state.authLoading = false;
+      state.authError = '';
+      renderProfile();
+      return;
+    }
+    state.authError = error.message;
+    state.authLoading = false;
+    renderProfile();
+  }
+}
+
 async function loadCurrentUser() {
   if (!state.authToken) {
     return;
   }
   try {
-    const response = await fetch('/api/auth/me', {
+    const response = await apiFetch('/api/auth/me', {
       headers: { Authorization: `Bearer ${state.authToken}` },
     });
     if (!response.ok) {
@@ -942,6 +1546,11 @@ async function loadCurrentUser() {
     }
     state.user = await response.json();
   } catch {
+    const cachedUser = localStorage.getItem('authUser');
+    if (cachedUser) {
+      state.user = JSON.parse(cachedUser);
+      return;
+    }
     state.authToken = '';
     state.user = null;
     localStorage.removeItem('authToken');
@@ -999,9 +1608,12 @@ async function logout() {
   const token = state.authToken;
   state.authToken = '';
   state.user = null;
+  state.profileEditing = false;
+  state.avatarUploading = false;
   localStorage.removeItem('authToken');
+  localStorage.removeItem('authUser');
   if (token) {
-    await fetch('/api/auth/logout', {
+    await apiFetch('/api/auth/logout', {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}` },
     }).catch(() => {});
@@ -1124,14 +1736,20 @@ function renderDays() {
       ${days
         .map((day, index) => {
           const tracks = tracksOfDay(day);
+          const multiAudioIndex = tracks.findIndex((track) => isMultiAudioQuestion(track));
+          const initialIndex = multiAudioIndex >= 0 ? multiAudioIndex : 0;
           return `
-            <button class="item-card" onclick="go('practice', { dayId: '${day.id}' })">
+            <button class="item-card day-card ${isDayCompleted(day.id) ? 'completed' : 'pending'}" onclick="go('practice', { dayId: '${day.id}', index: ${initialIndex} })">
               <span class="round-icon">${icon('calendar')}</span>
               <span>
                 <h3>${day.title || `${t('chooseDay')} ${index + 1}`}</h3>
                 <span class="subtle">${day.description || `${tracks.length} ${state.locale === 'zh' ? '题' : 'câu hỏi'}`}</span>
               </span>
-              <span class="chevron">${icon('next', 18)}</span>
+              <span class="day-card-status">
+                <strong>${isDayCompleted(day.id) ? 'Đã luyện' : 'Chưa luyện'}</strong>
+                <span class="day-status-icon">${icon(isDayCompleted(day.id) ? 'check' : 'play', isDayCompleted(day.id) ? 15 : 13)}</span>
+              </span>
+              ${isDayCompleted(day.id) ? '' : '<span class="day-start-cta">Bắt đầu luyện hôm nay</span>'}
             </button>
           `;
         })
@@ -1154,8 +1772,12 @@ function renderPractice() {
     `);
     return;
   }
-  ensureAudioTrack(track);
   const progress = state.index + 1;
+  if (isMultiAudioQuestion(track)) {
+    renderMultiAudioPractice(lesson, day, tracks, track, progress);
+    return;
+  }
+  ensureAudioTrack(track);
 
   mount(`
     ${header(`${lesson.level} | ${day.title || ''} | ${progress}/${tracks.length}`, questionTypeOf(track) === 'image' ? t('imageQuestion') : t('trueFalseQuestion'))}
@@ -1210,6 +1832,83 @@ function renderPractice() {
   `);
 }
 
+function renderMultiAudioPractice(lesson, day, tracks, track, progress) {
+  const audioItems = audioItemsOf(track);
+  const options = trackOptions(track);
+  const images = optionImagesOf(track);
+  const requiredCount = multiAudioRequiredCount(track);
+  const isComplete = Array.from({ length: requiredCount }, (_, index) => isMultiAudioStepSolved(track, index)).every(Boolean);
+  if (!String(state.audioTrackId || '').startsWith(`${track.id}:multi:`)) {
+    stopAudio();
+    state.audioTrackId = `${track.id}:multi:none`;
+    state.audioItemIndex = null;
+    state.selectedAudioItemIndex = 0;
+    state.audioDuration = 0;
+    state.audioRemaining = 0;
+  }
+
+  mount(`
+    ${header(`${lesson.level} | ${day.title || ''} | ${progress}/${tracks.length}`, 'Nhiều Audio')}
+    <div class="multi-client-head">
+      <strong>${trackText(track, 'prompt') || 'Nghe audio và chọn hình ảnh đúng'}</strong>
+      <span>${Math.min(progress, 5)}-${Math.min(progress + 4, tracks.length)}/${tracks.length}</span>
+    </div>
+
+    <section class="multi-client-audio-card">
+      ${Array.from({ length: requiredCount }, (_, index) => multiAudioRow(audioItems[index], index, track)).join('')}
+    </section>
+
+    <div class="multi-client-divider"></div>
+
+    <section class="multi-client-image-grid">
+      ${Array.from({ length: 5 }, (_, index) => multiAudioImageOption(options[index] || `Đáp án ${String.fromCharCode(65 + index)}`, images[index], index, track)).join('')}
+    </section>
+
+    <button class="primary-btn" style="margin-top:18px;${isComplete ? '' : 'opacity:.52'}" onclick="continuePractice()" ${isComplete ? '' : 'disabled'}>
+      ${progress === tracks.length ? t('viewReport') : t('nextQuestion')}
+    </button>
+  `);
+}
+
+function multiAudioRow(audio, index, track) {
+  const isActive = state.selectedAudioItemIndex === index;
+  const isPlaying = state.audioPlaying && state.audioItemIndex === index;
+  const isLoaded = !!audio?.url;
+  const selectedAnswer = multiAudioSelectionAt(index);
+  const answerLetter = selectedAnswer === null ? '' : String.fromCharCode(65 + selectedAnswer);
+  const isUnlocked = isMultiAudioRowUnlocked(track, index);
+  const isSolved = isMultiAudioStepSolved(track, index);
+  const timeLabel = isPlaying && state.audioDuration ? `${formatTime(state.audioRemaining)} / ${formatTime(state.audioDuration)}` : '';
+  return `
+    <div class="multi-client-audio-row ${isActive ? 'active' : ''} ${isLoaded && isUnlocked ? '' : 'disabled'} ${isSolved ? 'solved' : ''}" onclick="selectMultiAudioRow(${index})">
+      <strong>${index + 1}.</strong>
+      <button class="multi-client-play" onclick="event.stopPropagation(); toggleMultiAudio(${index})" ${isLoaded && isUnlocked ? '' : 'disabled'} aria-label="${isPlaying ? t('pause') : t('play')}">
+        ${icon(isPlaying ? 'pause' : 'volume-2', 19)}
+      </button>
+      <div class="multi-client-wave ${isPlaying ? 'active' : ''}" aria-hidden="true">${waveBars(22)}</div>
+      <span class="multi-client-time">${timeLabel}</span>
+      <span class="multi-client-box ${answerLetter ? 'filled' : ''} ${isSolved ? 'correct' : ''}">${answerLetter}</span>
+    </div>
+  `;
+}
+
+function multiAudioImageOption(option, imageUrl, index, track) {
+  const activeSelection = multiAudioSelectionAt(state.selectedAudioItemIndex);
+  const activeAttempt = Number.isFinite(Number(state.multiAudioAttempts[state.selectedAudioItemIndex])) ? Number(state.multiAudioAttempts[state.selectedAudioItemIndex]) : null;
+  const isSelected = activeSelection === index || activeAttempt === index;
+  const isUsedBySolvedAudio = state.multiAudioSelections.some((value, audioIndex) => Number(value) === index && audioIndex !== state.selectedAudioItemIndex && isMultiAudioStepSolved(track, audioIndex));
+  const expected = Number(audioItemsOf(track)[state.selectedAudioItemIndex]?.answerIndex ?? track.answerIndex ?? 0);
+  const isCorrect = activeSelection === index && index === expected;
+  const isWrong = activeAttempt === index && activeSelection !== index && index !== expected;
+  return `
+    <button class="multi-client-image-option ${isSelected ? 'selected' : ''} ${isUsedBySolvedAudio ? 'used' : ''} ${isCorrect ? 'correct' : ''} ${isWrong ? 'wrong' : ''}" onclick="selectAnswer(${index})" ${isUsedBySolvedAudio || state.checked ? 'disabled' : ''}>
+      <span class="multi-client-letter">${String.fromCharCode(65 + index)}</span>
+      ${imageUrl ? `<img src="${imageUrl}" alt="${option}" />` : `<span class="multi-client-image-empty">${option}</span>`}
+      <span class="image-option-mark">${isUsedBySolvedAudio ? icon('lock', 15) : isCorrect ? icon('check', 18) : isWrong ? icon('x', 18) : ''}</span>
+    </button>
+  `;
+}
+
 function imageOptionButton(option, imageUrl, index, answerIndex) {
   const isSelected = state.selected === index;
   const isCorrect = state.checked && index === answerIndex;
@@ -1247,7 +1946,45 @@ function selectAnswer(index) {
   if (state.checked) {
     return;
   }
+  const track = currentTracks()[state.index];
+  if (isMultiAudioQuestion(track)) {
+    if (!isMultiAudioRowUnlocked(track, state.selectedAudioItemIndex)) {
+      return;
+    }
+    const usedBySolvedAudio = state.multiAudioSelections.some((value, audioIndex) => Number(value) === index && audioIndex !== state.selectedAudioItemIndex && isMultiAudioStepSolved(track, audioIndex));
+    if (usedBySolvedAudio) {
+      return;
+    }
+    const expected = Number(audioItemsOf(track)[state.selectedAudioItemIndex]?.answerIndex ?? track.answerIndex ?? 0);
+    state.multiAudioAttempts[state.selectedAudioItemIndex] = index;
+    if (index !== expected) {
+      renderPractice();
+      return;
+    }
+    state.multiAudioSelections[state.selectedAudioItemIndex] = index;
+    if (isMultiAudioStepSolved(track, state.selectedAudioItemIndex)) {
+      const nextIndex = firstUnsolvedMultiAudioIndex(track);
+      if (nextIndex !== state.selectedAudioItemIndex) {
+        state.selectedAudioItemIndex = nextIndex;
+      }
+    }
+    renderPractice();
+    return;
+  }
   state.selected = index;
+  renderPractice();
+}
+
+function selectMultiAudioRow(index) {
+  if (state.checked) {
+    return;
+  }
+  const track = currentTracks()[state.index];
+  const nextIndex = Math.max(0, Math.min(4, Number(index) || 0));
+  if (!isMultiAudioRowUnlocked(track, nextIndex)) {
+    return;
+  }
+  state.selectedAudioItemIndex = nextIndex;
   renderPractice();
 }
 
@@ -1255,7 +1992,33 @@ function continuePractice() {
   const tracks = currentTracks();
   const track = tracks[state.index];
 
-  if (state.selected === null) {
+  if (isMultiAudioQuestion(track)) {
+    if (!Array.from({ length: multiAudioRequiredCount(track) }, (_, index) => isMultiAudioStepSolved(track, index)).every(Boolean)) {
+      return;
+    }
+    state.answers[state.index] = {
+      trackId: track.id,
+      selected: state.multiAudioSelections.slice(0, multiAudioRequiredCount(track)),
+      correct: multiAudioCorrect(track),
+      mode: modeOf(track),
+    };
+    if (state.index >= tracks.length - 1) {
+      markCurrentDayCompleted();
+      stopAudio();
+      state.screen = 'report';
+      renderReport();
+      return;
+    }
+    stopAudio();
+    state.index += 1;
+    state.selected = null;
+    state.multiAudioSelections = [];
+    state.multiAudioAttempts = [];
+    state.selectedAudioItemIndex = 0;
+    state.checked = false;
+    renderPractice();
+    return;
+  } else if (state.selected === null) {
     return;
   }
 
@@ -1263,7 +2026,7 @@ function continuePractice() {
     state.answers[state.index] = {
       trackId: track.id,
       selected: state.selected,
-      correct: state.selected === track.answerIndex,
+      correct: state.selected === answerIndexForTrack(track),
       mode: modeOf(track),
     };
     state.checked = true;
@@ -1272,6 +2035,7 @@ function continuePractice() {
   }
 
   if (state.index >= tracks.length - 1) {
+    markCurrentDayCompleted();
     stopAudio();
     state.screen = 'report';
     renderReport();
@@ -1281,6 +2045,9 @@ function continuePractice() {
   stopAudio();
   state.index += 1;
   state.selected = null;
+  state.multiAudioSelections = [];
+  state.multiAudioAttempts = [];
+  state.selectedAudioItemIndex = 0;
   state.checked = false;
   renderPractice();
 }
@@ -1318,6 +2085,80 @@ function toggleAudio() {
   }
 
   playCurrentAudio();
+}
+
+function toggleMultiAudio(index) {
+  if (state.audioPlaying && state.audioItemIndex === index) {
+    stopAudioTimer();
+    if (state.audioElement) {
+      state.audioElement.pause();
+    }
+    state.audioPlaying = false;
+    renderPractice();
+    return;
+  }
+
+  playMultiAudio(index);
+}
+
+function playMultiAudio(index) {
+  const track = currentTracks()[state.index];
+  if (!isMultiAudioRowUnlocked(track, index)) {
+    return;
+  }
+  const audio = audioItemsOf(track)[index];
+  state.selectedAudioItemIndex = index;
+
+  if (!audio?.url) {
+    state.audioPlaying = false;
+    state.audioItemIndex = null;
+    state.audioDuration = 0;
+    state.audioRemaining = 0;
+    renderPractice();
+    return;
+  }
+
+  const audioTrackId = `${track.id}:multi:${index}`;
+  if (!state.audioElement || state.audioElement.dataset.trackId !== audioTrackId) {
+    stopAudio();
+    state.audioElement = new Audio(audio.url);
+    state.audioElement.dataset.trackId = audioTrackId;
+    state.audioElement.onloadedmetadata = () => {
+      const duration = Math.ceil(state.audioElement.duration || 0);
+      state.audioDuration = duration;
+      state.audioRemaining = duration;
+      renderPractice();
+    };
+    state.audioElement.ontimeupdate = () => {
+      updateAudioClock();
+    };
+    state.audioElement.onended = () => {
+      state.audioRemaining = 0;
+      stopAudioTimer();
+      state.audioPlaying = false;
+      state.audioItemIndex = null;
+      renderPractice();
+    };
+    state.audioElement.onerror = () => {
+      stopAudio();
+      alert(t('audioLoadError'));
+      renderPractice();
+    };
+  }
+
+  state.audioTrackId = audioTrackId;
+  state.audioItemIndex = index;
+  state.selectedAudioItemIndex = index;
+  state.audioPlaying = true;
+  startAudioTimer();
+  state.audioElement.play().catch(() => {
+    stopAudio();
+    state.audioElement = null;
+    alert(t('audioLoadError'));
+    renderPractice();
+  });
+
+  renderPractice();
 }
 
 function playCurrentAudio() {
@@ -1398,6 +2239,7 @@ function stopAudioTimer() {
 function stopAudio(releaseElement = true) {
   stopAudioTimer();
   state.audioPlaying = false;
+  state.audioItemIndex = null;
   if (state.audioElement) {
     state.audioElement.pause();
   }
@@ -1408,11 +2250,12 @@ function stopAudio(releaseElement = true) {
 
 function renderReport() {
   const lesson = currentLesson();
-  const answered = state.answers.length || 10;
-  const correct = state.answers.filter((answer) => answer.correct).length;
+  const answerList = state.answers.filter(Boolean);
+  const answered = answerList.length || 10;
+  const correct = answerList.filter((answer) => answer.correct).length;
   const score = Math.round((correct / answered) * 100) || 0;
-  const localizedWeakMode = state.answers.find((answer) => !answer.correct)?.mode || t('listen');
-  const weakMode = state.answers.find((answer) => !answer.correct)?.mode || 'Nghe phân biệt cụm từ';
+  const localizedWeakMode = answerList.find((answer) => !answer.correct)?.mode || t('listen');
+  const weakMode = answerList.find((answer) => !answer.correct)?.mode || 'Nghe phân biệt cụm từ';
 
   mount(`
     ${header(t('reportTitle'), t('reportSub'))}
@@ -1463,6 +2306,8 @@ function retryWrong() {
   state.index = 0;
   state.answers = [];
   state.selected = null;
+  state.multiAudioSelections = [];
+  state.multiAudioAttempts = [];
   state.checked = false;
   state.sessionStartedAt = Date.now();
   stopAudio();
@@ -1493,8 +2338,8 @@ function header(title, subtitle) {
   `;
 }
 
-function waveBars() {
-  return Array.from({ length: 24 }, (_, index) => `<span style="height:${12 + ((index * 7) % 24)}px"></span>`).join('');
+function waveBars(count = 24) {
+  return Array.from({ length: count }, (_, index) => `<span style="height:${12 + ((index * 7) % 24)}px"></span>`).join('');
 }
 
 function formatClock(timestamp) {
@@ -1524,10 +2369,11 @@ function resultAction(kind, title, subtitle, action) {
 function renderReport() {
   const lesson = currentLesson();
   const total = currentTracks().length || 10;
-  const answered = state.answers.length || total;
-  const correct = state.answers.filter((answer) => answer.correct).length;
+  const answerList = state.answers.filter(Boolean);
+  const answered = answerList.length || total;
+  const correct = answerList.filter((answer) => answer.correct).length;
   const score = Math.round((correct / Math.max(1, answered)) * 100) || 0;
-  const weakMode = state.answers.find((answer) => !answer.correct)?.mode || t('listen');
+  const weakMode = answerList.find((answer) => !answer.correct)?.mode || t('listen');
   const startTime = formatClock(state.sessionStartedAt || Date.now());
   const isZh = state.locale === 'zh';
   const title = isZh ? '练习结果' : 'Kết quả luyện tập';
@@ -1586,8 +2432,10 @@ window.go = go;
 window.back = back;
 window.quickStart = quickStart;
 window.selectAnswer = selectAnswer;
+window.selectMultiAudioRow = selectMultiAudioRow;
 window.continuePractice = continuePractice;
 window.toggleAudio = toggleAudio;
+window.toggleMultiAudio = toggleMultiAudio;
 window.handleNav = handleNav;
 window.retryWrong = retryWrong;
 window.toggleLanguage = toggleLanguage;
@@ -1595,9 +2443,14 @@ window.togglePasswordVisibility = togglePasswordVisibility;
 window.submitLogin = submitLogin;
 window.submitRegister = submitRegister;
 window.logout = logout;
+window.openProfileEditor = openProfileEditor;
+window.closeProfileEditor = closeProfileEditor;
+window.submitProfileUpdate = submitProfileUpdate;
+window.chooseProfileAvatar = chooseProfileAvatar;
+window.handleProfileAvatarChange = handleProfileAvatarChange;
 
 async function refreshVisibleData() {
-  if (state.screen === 'practice' || state.screen === 'report') {
+  if (state.screen === 'report') {
     return;
   }
   await loadTopics();

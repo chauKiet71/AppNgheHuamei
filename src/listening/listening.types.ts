@@ -8,7 +8,7 @@ export interface ListeningTrack {
   id: string;
   title: string;
   subtitle: string;
-  questionType?: 'trueFalse' | 'image' | 'multiAudio';
+  questionType?: 'trueFalse' | 'image' | 'multiAudio' | 'shortConversation';
   mode: string;
   text: string;
   pinyin: string;

@@ -363,9 +363,9 @@ const localizedContent = {
       'Nghe phân biệt cụm từ': '短语辨听',
       'Chọn nghĩa': '选择意思',
       'Hiểu câu': '理解句子',
-      'Nghe phÃ¢n biá»‡t cá»¥m tá»«': '短语辨听',
-      'Chá»n nghÄ©a': '选择意思',
-      'Hiá»ƒu cÃ¢u': '理解句子',
+      'Nghe phân biệt cụm từ': '短语辨听',
+      'Chọn nghĩa': '选择意思',
+      'Hiểu câu': '理解句子',
     },
     phrases: {
       'gd-01': {
@@ -432,12 +432,128 @@ const localizedContent = {
   },
 };
 
+const mojibakePattern = /(?:Ã|Ä|Å|Æ|Ð|Ñ|áº|á»|å|æ|ç|è|é|ä|ã|ï|œ|°|½|¼|¾|¬|ƒ|€|Ÿ|¡|¢|§|¨|©|ª|«|®|¯|±|²|³|´|µ|¶|·|¸|¹|º|»|¿)/;
+
+function cleanUiText(value) {
+  const text = String(value ?? '');
+  if (!mojibakePattern.test(text)) {
+    return text;
+  }
+  try {
+    const bytes = Uint8Array.from([...text], (char) => char.charCodeAt(0) & 255);
+    const decoded = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+    return decoded.includes('\uFFFD') ? text : decoded;
+  } catch {
+    return text;
+  }
+}
+
+const zhUiTextMap = {
+  'Luyện nghe HSK': 'HSK 听力练习',
+  'Luyện nghe': '听力练习',
+  'Chủ đề mới': '新主题',
+  'Lộ trình mới': '新路线',
+  'Bộ đề mới': '新题组',
+  'Câu hỏi mới': '新题目',
+  'Cuộc sống hằng ngày': '日常生活',
+  'Lộ trình cơ bản': '基础路线',
+  'Nghe hiểu': '听力理解',
+  'Phần': '部分',
+  'Ngày': '第',
+  'Đã luyện': '已练习',
+  'Chưa luyện': '未练习',
+  'Bắt đầu luyện hôm nay': '开始今天练习',
+  'Nhiều Audio': '多个音频',
+  'Nghe audio và chọn hình ảnh đúng': '听音频并选择正确图片',
+  'Đáp án': '答案',
+  'Câu': '第',
+  'Đúng': '对',
+  'Sai': '错',
+  'Đúng!': '正确！',
+  'Sai!': '不正确！',
+  'Giải thích:': '解释：',
+  'Chưa có hình ảnh': '暂无图片',
+  'Chưa có giải thích.': '暂无解释。',
+  'Chọn đúng hay sai': '选择对或错',
+  'Nghe phán đoán tranh': '听音频判断图片',
+  'và': '和',
+};
+
+const zhCleanUiTextMap = {
+  'Đề thi HSK3': 'HSK3 试题',
+  'De thi HSK3': 'HSK3 试题',
+  'Giáo trình chuẩn HSK3': 'HSK3 标准教程',
+  'Giao trinh chuẩn HSK3': 'HSK3 标准教程',
+  'Giao trinh chuan HSK3': 'HSK3 标准教程',
+  'Giáo trình Chuẩn HSK 3': 'HSK3 标准教程',
+  'Cấp độ luyện nghe': '听力练习等级',
+  'Mô tả lộ trình.': '路线说明。',
+  'Mô tả lộ trình': '路线说明',
+  'Chọn bộ đề': '选择题组',
+  'Chọn chuyên đề luyện': '选择专项练习',
+  'Phần 1: Nghe hội thoại chọn tranh': '第 1 部分：听对话选图片',
+  'Phần 2: Nghe câu và chọn đúng/sai': '第 2 部分：听句子并判断对错',
+  'Phần 3: Hội thoại ngắn chọn A/B/C': '第 3 部分：短对话选择 A/B/C',
+  'Phần 4: Hội thoại dài chọn A/B/C': '第 4 部分：长对话选择 A/B/C',
+  'Nghe hội thoại chọn tranh': '听对话选图片',
+  'Nghe câu và chọn đúng/sai': '听句子并判断对错',
+  'Hội thoại ngắn chọn A/B/C': '短对话选择 A/B/C',
+  'Hội thoại dài chọn A/B/C': '长对话选择 A/B/C',
+  'bộ đề': '套题',
+  'ngày': '天',
+  'câu hỏi': '题',
+};
+
+function translateRenderedText(value) {
+  let text = cleanUiText(value);
+  if (state.locale !== 'zh') {
+    return text;
+  }
+  Object.entries(zhCleanUiTextMap).forEach(([source, target]) => {
+    text = text.replaceAll(source, target);
+  });
+  text = text.replace(/Phần\s+(\d+)\s*:/g, '第 $1 部分：');
+  text = text.replace(/(\d+)\s+câu hỏi/g, '$1 题');
+  text = text.replace(/(\d+)\s+ngày trước/g, '$1 天前');
+  text = text.replace(/(\d+)\s+ngày/g, '$1 天');
+  text = text.replace(/(\d+)\s+bộ đề/g, '$1 套题');
+  text = text.replace(/(\d+)\s+đúng/g, '$1 正确');
+  Object.entries(zhUiTextMap).forEach(([source, target]) => {
+    text = text.replaceAll(source, target);
+  });
+  text = text.replace(/(\d+)\s+câu hỏi/g, '$1 题');
+  text = text.replace(/(\d+)\s+ngày/g, '$1 天');
+  text = text.replace(/(\d+)\s+bộ đề/g, '$1 套题');
+  text = text.replace(/(\d+)\s+đúng/g, '$1 正确');
+  text = text.replace(/(\d+)\s+ngày trước/g, '$1 天前');
+  return text;
+}
+
+function translateRenderedTree(root) {
+  const visit = (node) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      node.nodeValue = translateRenderedText(node.nodeValue);
+      return;
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) {
+      return;
+    }
+    ['placeholder', 'aria-label', 'title', 'alt'].forEach((attribute) => {
+      if (node.hasAttribute(attribute)) {
+        node.setAttribute(attribute, translateRenderedText(node.getAttribute(attribute)));
+      }
+    });
+    Array.from(node.childNodes).forEach(visit);
+  };
+  visit(root);
+}
+
 function t(key) {
-  return translations[state.locale][key] || translations.vi[key] || key;
+  return cleanUiText(translations[state.locale][key] || translations.vi[key] || key);
 }
 
 function textOf(item, field) {
-  return localizedContent[state.locale]?.items?.[item.id]?.[field] || item[field] || '';
+  return cleanUiText(localizedContent[state.locale]?.items?.[item.id]?.[field] || item[field] || '');
 }
 
 function phraseKey(track) {
@@ -445,14 +561,14 @@ function phraseKey(track) {
 }
 
 function trackText(track, field) {
-  return localizedContent[state.locale]?.phrases?.[phraseKey(track)]?.[field] || track[field] || '';
+  return cleanUiText(localizedContent[state.locale]?.phrases?.[phraseKey(track)]?.[field] || track[field] || '');
 }
 
 function trackOptions(track) {
   if (track.questionType === 'image' || track.questionType === 'multiAudio') {
-    return track.options;
+    return arrayOf(track.options).map(cleanUiText);
   }
-  return localizedContent[state.locale]?.phrases?.[phraseKey(track)]?.options || track.options;
+  return arrayOf(localizedContent[state.locale]?.phrases?.[phraseKey(track)]?.options || track.options).map(cleanUiText);
 }
 
 function optionCountOf(track) {
@@ -530,7 +646,7 @@ function multiAudioCorrect(track) {
 }
 
 function modeOf(track) {
-  return localizedContent[state.locale]?.modes?.[track.mode] || track.mode;
+  return cleanUiText(localizedContent[state.locale]?.modes?.[track.mode] || track.mode);
 }
 
 function languageToggle() {
@@ -682,12 +798,34 @@ function writeLearningHistory(records) {
   state.historyRecords = Array.isArray(records) ? records.slice(0, 80) : [];
 }
 
+function upsertLearningHistoryRecord(record) {
+  if (!record?.dayId) {
+    return;
+  }
+  const records = readLearningHistory().filter((item) => item.dayId !== record.dayId);
+  writeLearningHistory([record, ...records]);
+  state.historyLoaded = true;
+}
+
 function isDayCompleted(dayId) {
   return readLearningHistory().some((record) => record.dayId === dayId);
 }
 
 function markCurrentDayCompleted() {
-  recordLearningHistory().catch(() => {});
+  const payload = buildLearningHistoryPayload();
+  if (!payload) {
+    return;
+  }
+  const optimisticRecord = {
+    id: `pending-${payload.dayId}-${Date.now().toString(36)}`,
+    userId: state.user?.id || 'local',
+    ...payload,
+    createdAt: payload.completedAt,
+  };
+  upsertLearningHistoryRecord(optimisticRecord);
+  recordLearningHistory(payload).catch((error) => {
+    console.warn('Cannot save learning history.', error);
+  });
 }
 
 function buildLearningHistoryPayload() {
@@ -723,10 +861,9 @@ function buildLearningHistoryPayload() {
   };
 }
 
-async function recordLearningHistory() {
-  const payload = buildLearningHistoryPayload();
+async function recordLearningHistory(payload = buildLearningHistoryPayload()) {
   if (!payload || !state.authToken) {
-    return;
+    return null;
   }
 
   const response = await apiFetch('/api/learning-history', {
@@ -741,7 +878,8 @@ async function recordLearningHistory() {
     throw new Error('Cannot save learning history.');
   }
   const savedRecord = await response.json();
-  writeLearningHistory([savedRecord, ...readLearningHistory()]);
+  upsertLearningHistoryRecord(savedRecord);
+  return savedRecord;
 }
 
 async function loadLearningHistory() {
@@ -773,7 +911,8 @@ function icon(name, size = 19) {
 }
 
 function mount(html) {
-  $app.innerHTML = html;
+  $app.innerHTML = cleanUiText(html);
+  translateRenderedTree($app);
   const cameraButton = document.querySelector('.account-camera-btn');
   if (cameraButton && state.avatarUploading) {
     cameraButton.classList.add('loading');
@@ -846,6 +985,9 @@ function go(screen, payload = {}) {
     state.lessonId = null;
     state.dayId = null;
   }
+  if (screen === 'lessons') {
+    state.dayId = null;
+  }
   if (screen === 'practice') {
     state.index = Number.isFinite(requestedIndex) ? Math.max(0, requestedIndex) : 0;
     state.answers = [];
@@ -864,7 +1006,8 @@ function back() {
     topics: 'home',
     levels: 'topics',
     sections: 'levels',
-    days: 'sections',
+    lessons: 'sections',
+    days: 'lessons',
     practice: 'days',
     report: 'home',
     history: 'profile',
@@ -881,6 +1024,7 @@ function render() {
     topics: renderTopics,
     levels: renderLevels,
     sections: renderSections,
+    lessons: renderLessons,
     days: renderDays,
     practice: renderPractice,
     report: renderReport,
@@ -1764,13 +1908,13 @@ function renderSections() {
       ${sections
         .map(
           (section) => {
-            const lesson = lessonsOfSection(section)[0];
+            const lessons = lessonsOfSection(section);
             return `
-            <button class="item-card" onclick="go('days', { sectionId: '${section.id}', lessonId: '${lesson?.id || ''}', dayId: '${daysOf(lesson)[0]?.id || ''}' })">
+            <button class="item-card" onclick="go('lessons', { sectionId: '${section.id}', lessonId: '${lessons[0]?.id || ''}' })">
               <span class="round-icon">${icon(section.icon)}</span>
               <span>
                 <h3>${textOf(section, 'title')}</h3>
-                <span class="subtle">${daysOf(lesson).length} ${state.locale === 'zh' ? '天' : 'ngày'} · ${tracksOf(lesson).length} ${state.locale === 'zh' ? '题' : 'câu hỏi'}</span>
+                <span class="subtle">${lessons.length} ${state.locale === 'zh' ? '\u5957\u9898' : 'b\u1ed9 \u0111\u1ec1'} · ${lessons.reduce((sum, lesson) => sum + daysOf(lesson).length, 0)} ${state.locale === 'zh' ? '\u5929' : 'ng\u00e0y'}</span>
               </span>
               <span class="chevron">${icon('next', 18)}</span>
             </button>
@@ -1778,6 +1922,34 @@ function renderSections() {
           },
         )
         .join('')}
+    </div>
+    ${nav('route')}
+  `);
+}
+
+function renderLessons() {
+  const section = currentSection();
+  const lessons = lessonsOfSection(section);
+  mount(`
+    ${header(textOf(section, 'title'), textOf(section, 'description'))}
+    <p class="section-title">${state.locale === 'zh' ? '选择题组' : 'Chọn bộ đề'}</p>
+    <div class="list">
+      ${
+        lessons
+          .map(
+            (lesson) => `
+              <button class="item-card" onclick="go('days', { lessonId: '${lesson.id}', dayId: '${daysOf(lesson)[0]?.id || ''}' })">
+                <span class="round-icon">${icon('book')}</span>
+                <span>
+                  <h3>${textOf(lesson, 'title')}</h3>
+                  <span class="subtle">${daysOf(lesson).length} ${state.locale === 'zh' ? '天' : 'ngày'} · ${tracksOf(lesson).length} ${state.locale === 'zh' ? '题' : 'câu hỏi'}</span>
+                </span>
+                <span class="chevron">${icon('next', 18)}</span>
+              </button>
+            `,
+          )
+          .join('') || `<div class="empty-state">${t('noQuestions')}</div>`
+      }
     </div>
     ${nav('route')}
   `);
@@ -1834,6 +2006,10 @@ function renderPractice() {
     renderMultiAudioPractice(lesson, day, tracks, track, progress);
     return;
   }
+  if (questionTypeOf(track) === 'trueFalse') {
+    renderTrueFalsePractice(lesson, day, tracks, track, progress);
+    return;
+  }
   ensureAudioTrack(track);
 
   mount(`
@@ -1848,6 +2024,8 @@ function renderPractice() {
       <button class="pill-btn">${t('slow')}</button>
       <button class="pill-btn">${t('subtitleOn')}</button>
     </div>
+
+    ${track.imageUrl && !isImageQuestion(track) ? `<img class="question-hero-image" src="${track.imageUrl}" alt="${track.imageAlt || track.title || ''}" />` : ''}
 
     <section class="audio-panel">
       <div class="play-row">
@@ -1889,6 +2067,69 @@ function renderPractice() {
   `);
 }
 
+function renderTrueFalsePractice(lesson, day, tracks, track, progress) {
+  ensureAudioTrack(track);
+  const answerIndex = Math.max(0, Math.min(1, answerIndexForTrack(track)));
+  const selectedCorrect = state.checked && state.selected === answerIndex;
+  const isZh = state.locale === 'zh';
+  const prompt = trackText(track, 'prompt') || (isZh ? '听音频判断图片' : 'Nghe phán đoán tranh');
+  const explanation = trackText(track, 'vietnamese') || (isZh ? '暂无解释。' : 'Chưa có giải thích.');
+
+  const questionImageHtml = track.imageUrl
+    ? `<img class="tf-question-image" src="${track.imageUrl}" alt="${track.imageAlt || track.title || prompt}" />`
+    : '';
+
+  mount(`
+    <header class="tf-screen-head">
+      <button class="icon-btn" onclick="back()" aria-label="${t('back')}">${icon('back')}</button>
+      <strong>${isZh ? '第' : 'Câu'} ${progress}/${tracks.length}</strong>
+      ${languageToggle()}
+    </header>
+
+    <section class="tf-question-card">
+      <div class="tf-question-title">
+        <strong>${prompt}</strong>
+        <span>${isZh ? '选择对或错' : 'Chọn đúng hay sai'}</span>
+      </div>
+
+      ${
+        track.imageUrl
+          ? `<img class="tf-question-image" src="${track.imageUrl}" alt="${track.imageAlt || track.title || prompt}" />`
+          : `<div class="tf-question-image empty">${isZh ? '暂无图片' : 'Chưa có hình ảnh'}</div>`
+      }
+
+      <section class="audio-panel tf-audio-panel">
+        <div class="play-row">
+          <button class="play-btn ${state.audioPlaying ? 'active' : ''}" onclick="toggleAudio()" aria-label="${state.audioPlaying ? t('pause') : t('play')}" ${track.audioUrl ? '' : 'disabled'}>
+            ${icon(state.audioPlaying ? 'pause' : 'volume', 22)}
+          </button>
+          <div class="wave ${state.audioPlaying ? 'active' : ''}" aria-hidden="true">${waveBars()}</div>
+          <span class="timecode" title="${t('secondsLeft')} ${state.audioRemaining}s">${formatTime(state.audioDuration || state.audioRemaining)}</span>
+        </div>
+        ${track.audioUrl ? '' : `<p class="audio-note">${t('noAudio')}</p>`}
+      </section>
+
+      <div class="tf-choice-grid">
+        ${trueFalseButton(isZh ? '对' : 'Đúng', 0, answerIndex)}
+        ${trueFalseButton(isZh ? '错' : 'Sai', 1, answerIndex)}
+      </div>
+
+      ${
+        state.checked
+          ? `<div class="tf-feedback ${selectedCorrect ? 'correct' : 'wrong'}">
+              <strong>${icon(selectedCorrect ? 'check' : 'x', 18)} ${selectedCorrect ? (isZh ? '正确！' : 'Đúng!') : (isZh ? '不正确！' : 'Sai!')}</strong>
+              <p><b>${isZh ? '解释：' : 'Giải thích:'}</b> ${explanation}</p>
+            </div>`
+          : ''
+      }
+
+      <button class="primary-btn" style="margin-top:18px;${state.selected === null ? 'opacity:.52' : ''}" onclick="continuePractice()" ${state.selected === null ? 'disabled' : ''}>
+        ${state.checked && progress === tracks.length ? t('viewReport') : state.checked ? t('nextQuestion') : t('check')}
+      </button>
+    </section>
+  `);
+}
+
 function renderMultiAudioPractice(lesson, day, tracks, track, progress) {
   const audioItems = audioItemsOf(track);
   const options = trackOptions(track);
@@ -1925,6 +2166,19 @@ function renderMultiAudioPractice(lesson, day, tracks, track, progress) {
       ${progress === tracks.length ? t('viewReport') : t('nextQuestion')}
     </button>
   `);
+}
+
+function trueFalseButton(label, index, answerIndex) {
+  const isSelected = state.selected === index;
+  const isCorrect = state.checked && index === answerIndex;
+  const isWrong = state.checked && isSelected && index !== answerIndex;
+
+  return `
+    <button class="tf-choice ${isSelected ? 'selected' : ''} ${isCorrect ? 'correct' : ''} ${isWrong ? 'wrong' : ''}" onclick="selectAnswer(${index})">
+      ${isCorrect ? icon('check', 17) : isWrong ? icon('x', 17) : ''}
+      <span>${label}</span>
+    </button>
+  `;
 }
 
 function multiAudioRow(audio, index, track) {
@@ -2527,3 +2781,4 @@ document.addEventListener('visibilitychange', () => {
 init().catch(() => {
   mount(`<div class="empty-state">${t('loadError')}</div>`);
 });
+

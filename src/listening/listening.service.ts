@@ -244,6 +244,24 @@ export class ListeningService {
     return { deleted: true };
   }
 
+  async moveLesson(topicId: string, sectionId: string, lessonId: string, direction: 'up' | 'down'): Promise<ListeningLesson[]> {
+    const topics = await this.loadTopics();
+    const topic = this.findTopic(topics, topicId);
+    const section = this.findSectionInTopic(topic, sectionId);
+    const index = section.lessons.findIndex((item) => item.id === lessonId);
+    if (index < 0) {
+      throw new NotFoundException('Lesson not found');
+    }
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= section.lessons.length) {
+      return section.lessons;
+    }
+    const [lesson] = section.lessons.splice(index, 1);
+    section.lessons.splice(targetIndex, 0, lesson);
+    await this.saveTopic(topic, topics.indexOf(topic));
+    return section.lessons;
+  }
+
   async createDay(topicId: string, sectionId: string, lessonId: string, input: DayInput): Promise<ListeningDay> {
     const topics = await this.loadTopics();
     const topic = this.findTopic(topics, topicId);
@@ -407,6 +425,22 @@ export class ListeningService {
     return track;
   }
 
+  async attachTrackImage(
+    topicId: string,
+    sectionId: string,
+    lessonId: string,
+    trackId: string,
+    imageUrl: string,
+  ): Promise<ListeningTrack> {
+    const topics = await this.loadTopics();
+    const topic = this.findTopic(topics, topicId);
+    const track = this.findTrack(this.findLesson(this.findSectionInTopic(topic, sectionId), lessonId), trackId);
+    track.imageUrl = imageUrl;
+    track.imageAlt = track.imageAlt || track.title;
+    await this.saveTopic(topic, topics.indexOf(topic));
+    return track;
+  }
+
   async attachTrackOptionImage(
     topicId: string,
     sectionId: string,
@@ -418,6 +452,13 @@ export class ListeningService {
     const topics = await this.loadTopics();
     const topic = this.findTopic(topics, topicId);
     const track = this.findTrack(this.findLesson(this.findSectionInTopic(topic, sectionId), lessonId), trackId);
+    if (track.questionType === 'trueFalse') {
+      track.imageUrl = imageUrl;
+      track.imageAlt = track.imageAlt || track.title;
+      track.optionImages = this.optionImagesForTrack(track);
+      await this.saveTopic(topic, topics.indexOf(topic));
+      return track;
+    }
     const maxOptionIndex = track.questionType === 'multiAudio' ? 4 : 3;
     if (optionIndex < 0 || optionIndex > maxOptionIndex) {
       throw new BadRequestException(`Option image index must be between 0 and ${maxOptionIndex}`);
@@ -526,7 +567,7 @@ export class ListeningService {
   }
 
   private optionImagesForTrack(track: Pick<ListeningTrack, 'questionType' | 'optionImages'>): string[] {
-    const count = track.questionType === 'multiAudio' ? 5 : 4;
+    const count = track.questionType === 'multiAudio' ? 5 : track.questionType === 'shortConversation' ? 3 : 4;
     return Array.from({ length: count }, (_, index) => track.optionImages?.[index] || '');
   }
 

@@ -166,6 +166,16 @@ export class ListeningController {
     return this.listeningService.deleteLesson(topicId, sectionId, lessonId);
   }
 
+  @Patch('topics/:topicId/sections/:sectionId/lessons/:lessonId/move')
+  moveLesson(
+    @Param('topicId') topicId: string,
+    @Param('sectionId') sectionId: string,
+    @Param('lessonId') lessonId: string,
+    @Body() body: { direction?: 'up' | 'down' },
+  ) {
+    return this.listeningService.moveLesson(topicId, sectionId, lessonId, body.direction === 'down' ? 'down' : 'up');
+  }
+
   @Post('topics/:topicId/sections/:sectionId/lessons/:lessonId/days')
   createDay(
     @Param('topicId') topicId: string,
@@ -309,6 +319,40 @@ export class ListeningController {
     }
     const audio = await this.uploadAudioToCloudinary(file);
     return this.listeningService.attachTrackAudioAtIndex(topicId, sectionId, lessonId, trackId, Number(audioIndex), audio);
+  }
+
+  @Post('topics/:topicId/sections/:sectionId/lessons/:lessonId/questions/:trackId/image')
+  @UseInterceptors(
+    FileInterceptor('image', {
+      storage: memoryStorage(),
+      fileFilter: (_request, file, callback) => {
+        const allowedExtensions = ['.jpg', '.jpeg', '.png', '.webp', '.gif'];
+        const extension = extname(file.originalname).toLowerCase();
+        const isImageMime = file.mimetype.startsWith('image/');
+        const isAllowedExtension = allowedExtensions.includes(extension);
+        callback(null, isImageMime || isAllowedExtension);
+      },
+      limits: {
+        fileSize: 10 * 1024 * 1024,
+      },
+    }),
+  )
+  async uploadTrackImage(
+    @Param('topicId') topicId: string,
+    @Param('sectionId') sectionId: string,
+    @Param('lessonId') lessonId: string,
+    @Param('trackId') trackId: string,
+    @UploadedFile() file: MulterFile,
+  ): Promise<ListeningTrack> {
+    if (!file) {
+      throw new BadRequestException('Image file is required. Supported formats: jpg, png, webp, gif.');
+    }
+    const image = await this.uploadFileToCloudinary(file, {
+      folder: process.env.CLOUDINARY_IMAGE_FOLDER || 'app-nghe-v1/images',
+      resourceType: 'image',
+      fallbackMimeType: 'image/jpeg',
+    });
+    return this.listeningService.attachTrackImage(topicId, sectionId, lessonId, trackId, image.url);
   }
 
   @Post('topics/:topicId/sections/:sectionId/lessons/:lessonId/questions/:trackId/option-images/:optionIndex')

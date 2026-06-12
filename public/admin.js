@@ -289,11 +289,17 @@ function optionImagesOf(item) {
 }
 
 function optionCountOf(item) {
-  return item?.questionType === 'multiAudio' ? 5 : 4;
+  if (item?.questionType === 'multiAudio') return 5;
+  if (item?.questionType === 'shortConversation') return 3;
+  return 4;
 }
 
 function isImageChoiceQuestion(item) {
   return ['image', 'multiAudio'].includes(item?.questionType || '');
+}
+
+function isShortConversationQuestion(item) {
+  return item?.questionType === 'shortConversation';
 }
 
 function audioItemsOf(item) {
@@ -470,6 +476,38 @@ function lessonButton(item) {
       <span><strong>${item.title}</strong><span class="muted">${item.level} · ${item.tracks.length} câu</span></span>
       <span class="pill">${item.tracks.length}</span>
     </button>
+  `;
+}
+
+function lessonButton(item) {
+  const tracks = tracksOfLesson(item);
+  return `
+    <div class="row-item sortable-row ${item.id === state.lessonId ? 'active' : ''}">
+      <button type="button" class="row-main" onclick="selectLesson('${item.id}')">
+        <span><strong>${item.title}</strong><span class="muted">${item.level} - ${tracks.length} ${t('sentences')}</span></span>
+        <span class="pill">${tracks.length}</span>
+      </button>
+      <div class="sort-actions">
+        <button type="button" class="icon-btn ${isLoading(`move-lesson-${item.id}-up`) ? 'loading' : ''}" onclick="moveLesson('${item.id}', 'up')" ${loadingAttrs(`move-lesson-${item.id}-up`)} title="Đưa lên">${loadingIcon(`move-lesson-${item.id}-up`, 'arrow-up')}</button>
+        <button type="button" class="icon-btn ${isLoading(`move-lesson-${item.id}-down`) ? 'loading' : ''}" onclick="moveLesson('${item.id}', 'down')" ${loadingAttrs(`move-lesson-${item.id}-down`)} title="Đưa xuống">${loadingIcon(`move-lesson-${item.id}-down`, 'arrow-down')}</button>
+      </div>
+    </div>
+  `;
+}
+
+function lessonButton(item) {
+  const tracks = tracksOfLesson(item);
+  return `
+    <div class="row-item sortable-row ${item.id === state.lessonId ? 'active' : ''}">
+      <button type="button" class="row-main" onclick="selectLesson('${item.id}')">
+        <span><strong>${item.title}</strong><span class="muted">${item.level} - ${tracks.length} ${t('sentences')}</span></span>
+        <span class="pill">${tracks.length}</span>
+      </button>
+      <div class="sort-actions">
+        <button type="button" class="icon-btn ${isLoading(`move-lesson-${item.id}-up`) ? 'loading' : ''}" onclick="moveLesson('${item.id}', 'up')" ${loadingAttrs(`move-lesson-${item.id}-up`)} title="Đưa lên">${loadingIcon(`move-lesson-${item.id}-up`, 'arrow-up')}</button>
+        <button type="button" class="icon-btn ${isLoading(`move-lesson-${item.id}-down`) ? 'loading' : ''}" onclick="moveLesson('${item.id}', 'down')" ${loadingAttrs(`move-lesson-${item.id}-down`)} title="Đưa xuống">${loadingIcon(`move-lesson-${item.id}-down`, 'arrow-down')}</button>
+      </div>
+    </div>
   `;
 }
 
@@ -992,7 +1030,7 @@ function sectionButton(item) {
   `;
 }
 
-function lessonButton(item) {
+function lessonButtonLegacy(item) {
   const tracks = tracksOfLesson(item);
   return `
     <button class="row-item ${item.id === state.lessonId ? 'active' : ''}" onclick="selectLesson('${item.id}')">
@@ -1003,7 +1041,14 @@ function lessonButton(item) {
 }
 
 function questionButton(item, index) {
-  const typeLabel = item.questionType === 'image' ? t('imageQuestion') : t('trueFalseQuestion');
+  const typeLabel =
+    item.questionType === 'image'
+      ? t('imageQuestion')
+      : item.questionType === 'multiAudio'
+        ? 'Nhiều Audio'
+        : item.questionType === 'shortConversation'
+          ? 'Hội thoại ngắn'
+          : t('trueFalseQuestion');
   return `
     <button class="row-item ${item.id === state.questionId ? 'active' : ''}" onclick="selectQuestion('${item.id}')">
       <span><strong>${index + 1}. ${item.title}</strong><span class="muted">${typeLabel} · ${item.mode} · ${item.keyword}${item.audioUrl ? ` · ${t('hasAudio')}` : ''}</span></span>
@@ -1441,6 +1486,17 @@ async function deleteLesson() {
   });
 }
 
+async function moveLesson(lessonId, direction) {
+  if (!section()) return;
+  return withLoading(`move-lesson-${lessonId}-${direction}`, async () => {
+    await mutate(`/topics/${state.topicId}/sections/${state.sectionId}/lessons/${lessonId}/move`, 'PATCH', { direction });
+    state.lessonId = lessonId;
+    state.dayId = daysOf(lesson())[0]?.id || null;
+    state.questionId = tracksOfDay(day())[0]?.id || null;
+    await loadTopics();
+  });
+}
+
 async function createDay() {
   if (!lesson()) {
     await ensureRouteLesson();
@@ -1506,12 +1562,14 @@ async function createQuestion(questionType = state.createQuestionType || 'image'
     await createDay();
   }
   if (!lesson() || !day()) return;
+  const currentDay = day();
+  state.dayId = currentDay.id;
   return withLoading(`create-question-${questionType}`, async () => {
     const created = await mutate(
       `/topics/${state.topicId}/sections/${state.sectionId}/lessons/${state.lessonId}/days/${state.dayId}/questions`,
       'POST',
       {
-        title: `${t('numberedQuestion')} ${tracksOfDay(day()).length + 1}`,
+        title: `${t('numberedQuestion')} ${tracksOfDay(currentDay).length + 1}`,
         questionType,
         mode: questionType === 'image' ? 'Câu hỏi hình ảnh' : 'Câu hỏi đúng sai',
         prompt: questionType === 'image' ? 'Quan sát hình và chọn đáp án đúng.' : 'Nghe và chọn đáp án đúng.',
@@ -1706,6 +1764,7 @@ function questionTypeTabs(item) {
     <div class="question-type-tabs">
       <button type="button" class="${type === 'trueFalse' ? 'active' : ''}" onclick="setQuestionType('trueFalse')">Đúng sai</button>
       <button type="button" class="${type === 'image' ? 'active' : ''}" onclick="setQuestionType('image')">Hình ảnh</button>
+      <button type="button" class="${type === 'shortConversation' ? 'active' : ''}" onclick="setQuestionType('shortConversation')">Hội thoại ngắn</button>
     </div>
   `;
 }
@@ -1719,6 +1778,10 @@ function questionCreatePicker(currentDay) {
         <button type="button" class="${selectedType === 'image' ? 'active' : ''}" onclick="selectCreateQuestionType('image')" ${currentDay ? '' : 'disabled'}>
           <strong>${t('imageQuestion')}</strong>
           <span>${t('imageQuestionHint')}</span>
+        </button>
+        <button type="button" class="${selectedType === 'shortConversation' ? 'active' : ''}" onclick="selectCreateQuestionType('shortConversation')" ${currentDay ? '' : 'disabled'}>
+          <strong>Hội thoại ngắn</strong>
+          <span>Tải audio, nhập câu hỏi và 3 đáp án.</span>
         </button>
         <button type="button" class="${selectedType === 'trueFalse' ? 'active' : ''}" onclick="selectCreateQuestionType('trueFalse')" ${currentDay ? '' : 'disabled'}>
           <strong>${t('trueFalseQuestion')}</strong>
@@ -1774,6 +1837,72 @@ function optionImageFields(item, options) {
             `,
           )
           .join('')}
+      </div>
+    </section>
+  `;
+}
+
+function shortConversationFields(item) {
+  const options = Array.from({ length: 3 }, (_, index) => arrayOf(item.options)[index] || `Đáp án ${String.fromCharCode(65 + index)}`);
+  const answerIndex = Math.max(0, Math.min(2, Number(item.answerIndex) || 0));
+  return `
+    <section class="short-conversation-admin" style="grid-column:1 / -1">
+      <div class="section-title">Câu hỏi hội thoại ngắn</div>
+      ${textarea('q-prompt', 'Câu hỏi', item.prompt || 'Hai người nói chuyện ở đâu?')}
+      <input id="q-answer" type="hidden" value="${answerIndex + 1}" />
+      <input id="q-mode" type="hidden" value="${escapeAttr(item.mode || 'Hội thoại ngắn')}" />
+      <input id="q-text" type="hidden" value="${escapeAttr(item.text || '')}" />
+      <input id="q-pinyin" type="hidden" value="${escapeAttr(item.pinyin || '')}" />
+      <input id="q-keyword" type="hidden" value="${escapeAttr(item.keyword || '')}" />
+      <input id="q-vietnamese" type="hidden" value="${escapeAttr(item.vietnamese || '')}" />
+      <input id="q-image-url" type="hidden" value="" />
+      <input id="q-image-alt" type="hidden" value="" />
+      <textarea id="q-options" style="display:none">${escapeHtml(options.join('\n'))}</textarea>
+      <div class="short-option-list">
+        ${options
+          .map(
+            (option, index) => `
+              <label class="short-option-row ${answerIndex === index ? 'correct' : ''}">
+                <span class="short-option-letter">${String.fromCharCode(65 + index)}</span>
+                <input id="q-short-option-${index}" type="text" value="${escapeAttr(option)}" />
+                <span class="answer-radio">
+                  <input type="radio" name="q-short-answer" ${answerIndex === index ? 'checked' : ''} onchange="setAnswerIndex(${index})" />
+                  Đúng
+                </span>
+              </label>
+            `,
+          )
+          .join('')}
+      </div>
+    </section>
+  `;
+}
+
+function trueFalseImageFields(item) {
+  return `
+    <section class="question-image-admin" style="grid-column:1 / -1">
+      <div class="section-head-inline">
+        <div>
+          <div class="section-title">Hình ảnh câu hỏi</div>
+          <p class="muted">Ảnh này sẽ hiển thị phía trên audio ở client.</p>
+        </div>
+        <button type="button" class="btn ${isLoading('upload-question-image') ? 'loading' : ''}" onclick="uploadQuestionImage()" ${loadingAttrs('upload-question-image')}>
+          ${loadingIcon('upload-question-image', 'save')} Tải ảnh
+        </button>
+      </div>
+      <div class="question-image-editor">
+        <div class="question-image-preview">
+          ${item.imageUrl ? `<img src="${escapeAttr(item.imageUrl)}" alt="${escapeAttr(item.imageAlt || item.title)}" />` : `<div class="image-placeholder">${icon('image', 28)}<span>Chưa có hình ảnh</span></div>`}
+        </div>
+        <label>URL hình ảnh
+          <input id="q-image-url" type="url" value="${escapeAttr(item.imageUrl || '')}" placeholder="https://..." />
+        </label>
+        <label>Mô tả ảnh
+          <input id="q-image-alt" type="text" value="${escapeAttr(item.imageAlt || '')}" />
+        </label>
+        <label>File ảnh
+          <input id="q-image-file" type="file" accept="image/*" />
+        </label>
       </div>
     </section>
   `;
@@ -2136,12 +2265,13 @@ function studentPreview(item) {
       <h3>Xem truoc giao dien hoc vien</h3>
       <div class="student-frame">
         <p>${escapeHtml(item.prompt || 'Nghe doan am thanh va chon dap an dung')}</p>
+        ${item.imageUrl && !isImageQuestion ? `<img class="preview-question-image" src="${escapeAttr(item.imageUrl)}" alt="${escapeAttr(item.imageAlt || item.title)}" />` : ''}
         <div class="audio-preview">
           <span class="audio-play">${icon('volume-2', 18)}</span>
           <span class="wave"></span>
           <span class="muted">00:00 / 00:34</span>
         </div>
-        <div class="choice-grid">
+        <div class="choice-grid ${questionType === 'shortConversation' ? 'short-choice-grid' : ''}">
           ${Array.from({ length: optionCount }, (_, index) => previewChoiceCard(item, index, options, images)).join('')}
         </div>
         <div class="preview-note">${icon('info', 15)} Hoc vien se nghe ngau nhien mot audio trong danh sach cua ngay hoc.</div>
@@ -2239,21 +2369,26 @@ async function createQuestion(questionType = state.createQuestionType || 'image'
     await createDay();
   }
   if (!lesson() || !day()) return;
+  const currentDay = day();
+  state.dayId = currentDay.id;
   return withLoading(`create-question-${questionType}`, async () => {
     const isMultiAudio = questionType === 'multiAudio';
+    const isShortConversation = questionType === 'shortConversation';
     const isImageType = questionType === 'image' || isMultiAudio;
-    const optionCount = isMultiAudio ? 5 : 4;
+    const optionCount = isMultiAudio ? 5 : isShortConversation ? 3 : 4;
+    const defaultOptions = Array.from({ length: optionCount }, (_, index) => `Đáp án ${String.fromCharCode(65 + index)}`);
     const created = await mutate(
       `/topics/${state.topicId}/sections/${state.sectionId}/lessons/${state.lessonId}/days/${state.dayId}/questions`,
       'POST',
       {
-        title: `${t('numberedQuestion')} ${tracksOfDay(day()).length + 1}`,
+        title: `${t('numberedQuestion')} ${tracksOfDay(currentDay).length + 1}`,
         questionType,
         mode: isMultiAudio ? 'Nhiều audio chọn hình' : questionType === 'image' ? 'Câu hỏi hình ảnh' : 'Câu hỏi đúng sai',
         prompt: isImageType ? 'Nghe đoạn âm thanh và chọn hình ảnh đúng.' : 'Nghe và chọn đáp án đúng.',
         options: isImageType ? Array.from({ length: optionCount }, (_, index) => `Đáp án ${String.fromCharCode(65 + index)}`) : ['Đúng', 'Sai'],
         optionImages: Array.from({ length: optionCount }, () => ''),
         audioItems: isMultiAudio ? [] : undefined,
+        ...(isShortConversation ? { mode: 'Hội thoại ngắn', prompt: 'Hai người nói chuyện ở đâu?', options: defaultOptions, answerIndex: 0 } : {}),
       },
     );
     state.questionId = created.id;
@@ -2265,6 +2400,14 @@ function setQuestionType(questionType) {
   const current = question();
   if (!current) return;
   current.questionType = questionType;
+  if (questionType === 'shortConversation') {
+    current.mode = 'Hội thoại ngắn';
+    current.prompt = current.prompt || 'Hai người nói chuyện ở đâu?';
+    current.options = Array.from({ length: 3 }, (_, index) => arrayOf(current.options)[index] || `Đáp án ${String.fromCharCode(65 + index)}`);
+    current.optionImages = [];
+    current.audioItems = [];
+    current.answerIndex = Math.min(Number(current.answerIndex) || 0, 2);
+  }
   if (questionType === 'trueFalse') {
     current.options = ['Đúng', 'Sai'];
     current.answerIndex = 0;
@@ -2285,12 +2428,16 @@ async function saveQuestion() {
   const currentQuestion = question();
   const questionType = currentQuestion.questionType || 'trueFalse';
   const isImageQuestion = isImageChoiceQuestion(currentQuestion);
-  const options = isImageQuestion
+  const isShortConversation = questionType === 'shortConversation';
+  let options = isImageQuestion
     ? Array.from({ length: optionCountOf(currentQuestion) }, (_, index) => value(`q-option-label-${index}`) || `Đáp án ${String.fromCharCode(65 + index)}`)
     : value('q-options')
         .split('\n')
         .map((item) => item.trim())
         .filter(Boolean);
+  if (isShortConversation) {
+    options = Array.from({ length: 3 }, (_, index) => value(`q-short-option-${index}`) || `Đáp án ${String.fromCharCode(65 + index)}`);
+  }
   const audioItems = questionType === 'multiAudio'
     ? Array.from({ length: 5 }, (_, index) => ({
         url: value(`q-audio-url-${index}`),
@@ -2348,6 +2495,36 @@ async function uploadQuestionAudioAtIndex(index) {
     }
     await loadTopics();
     showToast(t('uploadedAudio'));
+  });
+}
+
+async function uploadQuestionImage() {
+  if (!question()) return;
+  const input = document.getElementById('q-image-file');
+  const file = input?.files?.[0];
+  if (!file) {
+    showToast('Vui lòng chọn ảnh trước');
+    render();
+    return;
+  }
+
+  return withLoading('upload-question-image', async () => {
+    const formData = new FormData();
+    formData.append('image', file);
+    const response = await fetch(
+      `${apiBase}/topics/${state.topicId}/sections/${state.sectionId}/lessons/${state.lessonId}/questions/${state.questionId}/option-images/0`,
+      {
+        method: 'POST',
+        body: formData,
+      },
+    );
+    if (!response.ok) {
+      const errorText = await response.text();
+      showToast(t('uploadFailed'));
+      throw new Error(errorText);
+    }
+    await loadTopics();
+    showToast('Đã tải ảnh');
   });
 }
 
@@ -2438,10 +2615,11 @@ function toggleQuestionAudioAtIndex(index) {
 function questionTypeTabs(item) {
   const type = item?.questionType || 'trueFalse';
   return `
-    <div class="question-type-tabs question-type-tabs-three">
+    <div class="question-type-tabs question-type-tabs-four">
       <button type="button" class="${type === 'trueFalse' ? 'active' : ''}" onclick="setQuestionType('trueFalse')">Đúng sai</button>
       <button type="button" class="${type === 'image' ? 'active' : ''}" onclick="setQuestionType('image')">Hình ảnh</button>
       <button type="button" class="${type === 'multiAudio' ? 'active' : ''}" onclick="setQuestionType('multiAudio')">Nhiều Audio</button>
+      <button type="button" class="${type === 'shortConversation' ? 'active' : ''}" onclick="setQuestionType('shortConversation')">Hội thoại ngắn</button>
     </div>
   `;
 }
@@ -2451,7 +2629,7 @@ function questionCreatePicker(currentDay) {
   return `
     <div class="question-create-box">
       <div class="section-title">${t('questionType')}</div>
-      <div class="question-create-options question-create-options-three">
+      <div class="question-create-options question-create-options-four">
         <button type="button" class="${selectedType === 'image' ? 'active' : ''}" onclick="selectCreateQuestionType('image')" ${currentDay ? '' : 'disabled'}>
           <strong>${t('imageQuestion')}</strong>
           <span>${t('imageQuestionHint')}</span>
@@ -2459,6 +2637,10 @@ function questionCreatePicker(currentDay) {
         <button type="button" class="${selectedType === 'multiAudio' ? 'active' : ''}" onclick="selectCreateQuestionType('multiAudio')" ${currentDay ? '' : 'disabled'}>
           <strong>Nhiều Audio</strong>
           <span>Thêm 1-5 audio và chọn 1 hình đúng.</span>
+        </button>
+        <button type="button" class="${selectedType === 'shortConversation' ? 'active' : ''}" onclick="selectCreateQuestionType('shortConversation')" ${currentDay ? '' : 'disabled'}>
+          <strong>Hội thoại ngắn</strong>
+          <span>Tải audio, nhập câu hỏi và 3 đáp án.</span>
         </button>
         <button type="button" class="${selectedType === 'trueFalse' ? 'active' : ''}" onclick="selectCreateQuestionType('trueFalse')" ${currentDay ? '' : 'disabled'}>
           <strong>${t('trueFalseQuestion')}</strong>
@@ -2571,12 +2753,37 @@ function questionForm(item) {
   const questionType = item.questionType || 'trueFalse';
   const isImageQuestion = isImageChoiceQuestion(item);
   const options = isImageQuestion ? imageChoiceOptions(item) : arrayOf(item.options);
+  if (questionType === 'shortConversation') {
+    return `
+      <form id="question-form" class="form-grid short-conversation-form">
+        <div style="grid-column:1 / -1">${questionTypeTabs(item)}</div>
+        ${input('q-title', t('questionName'), item.title)}
+        ${shortConversationFields(item)}
+        <label style="grid-column:1 / -1">${t('questionAudio')}
+          <input id="q-audio" type="file" accept="audio/*" />
+        </label>
+        <div style="grid-column:1 / -1">
+          ${
+            item.audioUrl
+              ? `<audio controls src="${item.audioUrl}" style="width:100%;height:38px"></audio><p class="muted" style="margin:6px 0 0">${item.audioFileName || item.audioUrl}</p>`
+              : `<p class="muted" style="margin:0">${t('noAudio')}</p>`
+          }
+        </div>
+        <div class="form-actions" style="grid-column:1 / -1">
+          <button type="button" class="btn primary ${isLoading('save-question') ? 'loading' : ''}" onclick="saveQuestion()" ${loadingAttrs('save-question')}>${loadingIcon('save-question', 'save')} ${t('saveQuestion')}</button>
+          <button type="button" class="btn ${isLoading('upload-audio') ? 'loading' : ''}" onclick="uploadQuestionAudio()" ${loadingAttrs('upload-audio')}>${loadingIcon('upload-audio', 'save')} ${t('uploadAudio')}</button>
+          <button type="button" class="btn danger ${isLoading('delete-question') ? 'loading' : ''}" onclick="deleteQuestion()" ${loadingAttrs('delete-question')}>${loadingIcon('delete-question', 'trash')} ${t('deleteQuestion')}</button>
+        </div>
+      </form>
+    `;
+  }
   return `
     <form id="question-form" class="form-grid ${isImageQuestion ? 'image-question-form' : ''}">
       <div style="grid-column:1 / -1">${questionTypeTabs(item)}</div>
       ${input('q-title', t('questionName'), item.title)}
       ${input('q-mode', t('questionMode'), item.mode)}
       ${questionType === 'multiAudio' ? audioListFields(item) : ''}
+      ${questionType === 'trueFalse' ? trueFalseImageFields(item) : ''}
       ${isImageQuestion ? optionImageFields(item, options) : ''}
       ${input('q-text', 'Nội dung nghe/đáp án', item.text)}
       ${input('q-pinyin', 'Pinyin', item.pinyin)}
@@ -2656,7 +2863,7 @@ function studentPreview(item) {
           <span class="wave"></span>
           <span class="muted">00:00 / 00:34</span>
         </div>
-        <div class="choice-grid">
+        <div class="choice-grid ${questionType === 'shortConversation' ? 'short-choice-grid' : ''}">
           ${Array.from({ length: optionCount }, (_, index) => previewChoiceCard(item, index, options, images)).join('')}
         </div>
         ${
@@ -2684,6 +2891,7 @@ Object.assign(window, {
   createLesson,
   saveLesson,
   deleteLesson,
+  moveLesson,
   createDay,
   saveDay,
   deleteDay,
@@ -2692,6 +2900,7 @@ Object.assign(window, {
   saveQuestion,
   uploadQuestionAudio,
   uploadQuestionAudioAtIndex,
+  uploadQuestionImage,
   clearQuestionAudioAtIndex,
   toggleQuestionAudioAtIndex,
   stopQuestionAudioPreview,
